@@ -4837,6 +4837,34 @@ int rc_request_staff_activity(RCHandle handle, const char* account) {
     return sendListerText(conn, "getstaffactivity", account, PLI_SENDTEXT);
 }
 
+int rc_update_levels(RCHandle handle, const char* const* levels, int count) {
+    if (!handle || !levels || count <= 0) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    const int encodedCount = std::min(count, 0x6fff);
+    std::vector<uint8_t> data;
+    data.reserve(2 + encodedCount * 2);
+    data.push_back(static_cast<uint8_t>((encodedCount >> 7) + 0x20));
+    data.push_back(static_cast<uint8_t>((encodedCount & 0x7f) + 0x20));
+    for (int index = 0; index < encodedCount; ++index) {
+        const char* level = levels[index] == nullptr ? "" : levels[index];
+        const size_t length = strlen(level);
+        if (length < 0xe0) {
+            data.push_back(static_cast<uint8_t>(length + 0x20));
+            data.insert(data.end(), level, level + length);
+        } else {
+            data.push_back(0xff);
+            data.insert(data.end(), level, level + 0xdf);
+        }
+    }
+    std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_UPDATELEVELS, data);
+    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+}
+
+int rc_update_level(RCHandle handle, const char* level) {
+    return rc_update_levels(handle, &level, 1);
+}
+
 int rc_set_ban(RCHandle handle, const char* target, const char* world, int banned, const char* ban_type, const char* release_time, const char* reason) {
     if (!handle || !target || !world) return 0;
     RCConnection* conn = (RCConnection*)handle;

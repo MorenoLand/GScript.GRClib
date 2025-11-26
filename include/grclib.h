@@ -236,6 +236,8 @@ GRCLIB_API int rc_upload_folder_config(RCHandle handle, const char* content);
 GRCLIB_API int rc_send_raw_packet(RCHandle handle, int packet_id, const char* data, int length);
 GRCLIB_API int rc_send_admin_message(RCHandle handle, int player_id, const char* message);
 GRCLIB_API int rc_send_admin_message_all(RCHandle handle, const char* message);
+GRCLIB_API int rc_update_level(RCHandle handle, const char* level);
+GRCLIB_API int rc_update_levels(RCHandle handle, const char* const* levels, int count);
 GRCLIB_API int rc_reset_player(RCHandle handle, const char* account);
 GRCLIB_API char* rc_gtokenize(const char* text);
 GRCLIB_API char* rc_gtokenize_reverse(const char* content);
