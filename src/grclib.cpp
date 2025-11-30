@@ -864,6 +864,8 @@ struct RCConnection {
     RC_OnAccountList on_account_list;
     void* on_account_list_data;
     std::string pending_local_npcs_level;
+    std::string pending_pm_server_name;
+    std::vector<std::string> pending_pm_server_players;
     std::string pending_ban_account;
     int pending_ban_player_id;
     std::string server_options;
@@ -1506,6 +1508,18 @@ struct RCConnection {
                                 parsed_props.push_back(prop);
                             }
                             if (!account_from_props.empty()) account = account_from_props;
+                            if (player_id >= 16000 && !pending_pm_server_name.empty()) {
+                                std::string player = nickname.empty() ? account : nickname;
+                                pending_pm_server_players.push_back(player);
+                                if (on_pm_server_players) {
+                                    const std::string server_name = pending_pm_server_name;
+                                    const std::string player_data = joinLines(pending_pm_server_players);
+                                    pushEvent([this, server_name, player_data]() {
+                                        on_pm_server_players(server_name.c_str(), player_data.c_str(), on_pm_server_players_data);
+                                    });
+                                }
+                                break;
+                            }
                             {
                                 std::lock_guard<std::mutex> lock(cache_mutex);
                                 bool found = false;
@@ -3539,10 +3553,6 @@ int rc_upload_file(RCHandle handle, const char* path, const char* content, int l
         int remaining = length - offset;
         int chunk_len = remaining < chunk_size ? remaining : chunk_size;
         if (!send_chunk(content + offset, chunk_len)) return 0;
-        if (conn->on_filebrowser_message) {
-            std::string msg = "Uploaded chunk: " + std::to_string(offset + chunk_len) + "/" + std::to_string(length) + " bytes for " + filename;
-            conn->pushEvent([conn, msg]() { conn->on_filebrowser_message(msg.c_str(), conn->on_filebrowser_message_data); });
-        }
     }
     std::vector<uint8_t> end_packet = conn->protocol.sendPacket(PLI_RC_LARGEFILEEND, start_data);
     return grc::sendAll(conn->game_socket, end_packet.data(), end_packet.size()) ? 1 : 0;
@@ -4156,6 +4166,8 @@ int rc_request_pm_server_players(RCHandle handle, const char* server_name) {
     if (!handle || !server_name) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    conn->pending_pm_server_name = server_name;
+    conn->pending_pm_server_players.clear();
     std::string request = protocolTextNamespace() + "\npmserverplayers\n" + std::string(server_name) + "\n";
     std::string tokenized = grc::gtokenizeString(request);
     std::vector<uint8_t> data(tokenized.begin(), tokenized.end());
@@ -4835,6 +4847,20 @@ int rc_request_staff_activity(RCHandle handle, const char* account) {
     if (!handle || !account) return 0;
     RCConnection* conn = (RCConnection*)handle;
     return sendListerText(conn, "getstaffactivity", account, PLI_SENDTEXT);
+}
+int rc_unmap_pm_server(RCHandle handle, const char* server_name) {
+    if (!handle || !server_name) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    if (conn->pending_pm_server_name == server_name) {
+        conn->pending_pm_server_name.clear();
+        conn->pending_pm_server_players.clear();
+    }
+    std::string request = protocolTextNamespace() + "\npmunmapserver\n" + std::string(server_name) + "\n";
+    std::string tokenized = grc::gtokenizeString(request);
+    std::vector<uint8_t> data(tokenized.begin(), tokenized.end());
+    std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_REQUESTTEXT, data);
+    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
 
 int rc_update_levels(RCHandle handle, const char* const* levels, int count) {
