@@ -1559,6 +1559,7 @@ struct RCConnection {
                 if (offset + 2 <= packet.size()) {
                     int player_id = grc::decodeGShort(packet.data() + offset);
                     offset += 2;
+                    if (player_id >= 16000 && !pending_pm_server_name.empty()) break;
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     for (auto it = player_cache.begin(); it != player_cache.end(); ++it) {
                         if (it->id == player_id) {
