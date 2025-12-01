@@ -1188,6 +1188,15 @@ struct RCConnection {
                         int message_len = grc::decodeGByte(packet[offset++]);
                         if (offset + message_len <= packet.size()) {
                             std::string message(packet.begin() + offset, packet.begin() + offset + message_len);
+                            std::string sender;
+                            {
+                                std::lock_guard<std::mutex> lock(cache_mutex);
+                                for (const auto& player : player_cache) if (player.id == player_id) {
+                                    sender = player.nick != nullptr && *player.nick != '\0' ? player.nick : player.account == nullptr ? "" : player.account;
+                                    break;
+                                }
+                            }
+                            if (!sender.empty()) message = sender + ": " + message;
                             if (on_server_data) {
                                 pushEvent([this, message]() {
                                     on_server_data("toall", message.c_str(), on_server_data_data);
