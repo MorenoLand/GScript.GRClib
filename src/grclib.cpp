@@ -1149,7 +1149,9 @@ struct RCConnection {
                     size_t parse_offset = offset;
                     std::string parsed_account = grc::readLengthString(packet, parse_offset);
                     if (!parsed_account.empty()) account = parsed_account;
-                    details.assign(packet.begin() + offset, packet.end());
+                    const bool banned = parse_offset < packet.size() && packet[parse_offset++] == '!';
+                    details = "banned=" + std::string(banned ? "1\n" : "0\n");
+                    details.append(packet.begin() + parse_offset, packet.end());
                 }
                 if (on_ban_data) {
                     pushEvent([this, account, details]() {
