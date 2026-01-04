@@ -801,6 +801,8 @@ struct RCConnection {
     void* on_message_data;
     RC_OnPrivateMessage on_private_message;
     void* on_private_message_data;
+    RC_OnPrivateMessageEx on_private_message_ex;
+    void* on_private_message_ex_data;
     RC_OnFileReceived on_file_received;
     void* on_file_received_data;
     RC_OnWeaponAdded on_weapon_added;
@@ -871,7 +873,7 @@ struct RCConnection {
     RCConnection() : game_socket(INVALID_SOCKET), nc_socket(INVALID_SOCKET), running(false), connected(false), authenticated(false), nc_connected(false), nc_authenticated(false), is_new_protocol(false), npcserver_player_id(0),
         on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr),
         on_player_joined(nullptr), on_player_joined_data(nullptr), on_player_left(nullptr), on_player_left_data(nullptr),
-        on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr),
+        on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr),
         on_weapon_added(nullptr), on_weapon_added_data(nullptr), on_weapon_deleted(nullptr), on_weapon_deleted_data(nullptr),
         on_class_added(nullptr), on_class_added_data(nullptr), on_class_deleted(nullptr), on_class_deleted_data(nullptr),
         on_npc_added(nullptr), on_npc_added_data(nullptr), on_npc_deleted(nullptr), on_npc_deleted_data(nullptr),
@@ -1929,6 +1931,10 @@ struct RCConnection {
                     int player_id = grc::decodeGShort(packet.data() + offset);
                     offset += 2;
                     std::string message(packet.begin() + offset, packet.end());
+                    std::string type = "normal";
+                    if (message.rfind("\"Mass message:\"", 0) == 0 || message.rfind("Mass message:", 0) == 0) type = "mass";
+                    else if (message.rfind("\"Guild message:\"", 0) == 0 || message.rfind("Guild message:", 0) == 0) type = "guild";
+                    else if (message.rfind("\"Admin message:\"", 0) == 0 || message.rfind("Admin message:", 0) == 0) type = "admin";
                     size_t comma_pos = message.find(',');
                     if (comma_pos != std::string::npos && comma_pos + 1 < message.length()) {
                         std::string msg_content = message.substr(comma_pos + 1);
@@ -1950,6 +1956,11 @@ struct RCConnection {
                         if (on_private_message) {
                             pushEvent([this, player_id, account, nick, msg_content]() {
                                 on_private_message(player_id, account.c_str(), nick.c_str(), msg_content.c_str(), on_private_message_data);
+                            });
+                        }
+                        if (on_private_message_ex) {
+                            pushEvent([this, player_id, account, nick, msg_content, type]() {
+                                on_private_message_ex(player_id, account.c_str(), nick.c_str(), msg_content.c_str(), type.c_str(), on_private_message_ex_data);
                             });
                         }
                     }
@@ -3205,6 +3216,12 @@ void rc_on_pm_servers_updated(RCHandle handle, RC_OnPMServersUpdated callback, v
     RCConnection* conn = (RCConnection*)handle;
     conn->on_pm_servers_updated = callback;
     conn->on_pm_servers_updated_data = user_data;
+}
+void rc_on_private_message_ex(RCHandle handle, RC_OnPrivateMessageEx callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_private_message_ex = callback;
+    conn->on_private_message_ex_data = user_data;
 }
 void rc_on_pm_guilds_updated(RCHandle handle, RC_OnPMGuildsUpdated callback, void* user_data) {
     if (!handle) return;

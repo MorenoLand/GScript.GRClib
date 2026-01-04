@@ -66,6 +66,7 @@ typedef void (*RC_OnPlayerJoined)(const char* account, int player_id, void* user
 typedef void (*RC_OnPlayerLeft)(const char* account, int player_id, void* user_data);
 typedef void (*RC_OnMessage)(const char* message, void* user_data);
 typedef void (*RC_OnPrivateMessage)(int player_id, const char* account, const char* nick, const char* message, void* user_data);
+typedef void (*RC_OnPrivateMessageEx)(int player_id, const char* account, const char* nick, const char* message, const char* type, void* user_data);
 typedef void (*RC_OnFileReceived)(const char* path, const void* content, int length, void* user_data);
 typedef void (*RC_OnWeaponAdded)(const char* name, void* user_data);
 typedef void (*RC_OnWeaponDeleted)(const char* name, void* user_data);
@@ -110,6 +111,7 @@ GRCLIB_API void rc_on_player_joined(RCHandle handle, RC_OnPlayerJoined callback,
 GRCLIB_API void rc_on_player_left(RCHandle handle, RC_OnPlayerLeft callback, void* user_data);
 GRCLIB_API void rc_on_message(RCHandle handle, RC_OnMessage callback, void* user_data);
 GRCLIB_API void rc_on_private_message(RCHandle handle, RC_OnPrivateMessage callback, void* user_data);
+GRCLIB_API void rc_on_private_message_ex(RCHandle handle, RC_OnPrivateMessageEx callback, void* user_data);
 GRCLIB_API void rc_on_file_received(RCHandle handle, RC_OnFileReceived callback, void* user_data);
 GRCLIB_API void rc_on_weapon_added(RCHandle handle, RC_OnWeaponAdded callback, void* user_data);
 GRCLIB_API void rc_on_weapon_deleted(RCHandle handle, RC_OnWeaponDeleted callback, void* user_data);
