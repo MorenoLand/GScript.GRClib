@@ -3,10 +3,10 @@
 #include "IEnums.h"
 #include <thread>
 #include <mutex>
-#include <windows.h>
 #include <queue>
 #include <atomic>
 #include <cstring>
+#include <cstdlib>
 #include <memory>
 #include <functional>
 #include <map>
@@ -14,11 +14,23 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 struct RCConnection;
 static int sendListerText(RCConnection* conn, const std::string& command, const std::string& value, int packet_id);
 
+static char* grcStrdup(const char* text) {
+    if (!text) text = "";
+    size_t length = strlen(text) + 1;
+    char* out = (char*)malloc(length);
+    if (out) memcpy(out, text, length);
+    return out;
+}
+
 static bool validateHeap(const char* context) {
+#ifdef _WIN32
     HANDLE heaps[16];
     DWORD count = GetProcessHeaps(16, heaps);
     for (DWORD i = 0; i < count; i++) {
@@ -30,12 +42,20 @@ static bool validateHeap(const char* context) {
             return false;
         }
     }
+#else
+    (void)context;
+#endif
     return true;
 }
 
 static void writeNativeTrace(const std::string& message) {
     FILE* f = nullptr;
+#ifdef _WIN32
     if (fopen_s(&f, "native_grclib_trace.log", "ab") == 0 && f) {
+#else
+    f = fopen("native_grclib_trace.log", "ab");
+    if (f) {
+#endif
         std::string line = message + "\n";
         fwrite(line.data(), 1, line.size(), f);
         fclose(f);
@@ -373,7 +393,7 @@ static const char* colorName(int color) {
 }
 
 static char* dupText(const std::string& text) {
-    return _strdup(text.c_str());
+    return grcStrdup(text.c_str());
 }
 
 static const std::vector<std::string>& rightsNames() {
@@ -848,7 +868,7 @@ struct RCConnection {
                             if (offset + nick_len <= packet.size()) {
                                 std::string nickname(packet.begin() + offset, packet.begin() + offset + nick_len);
                                 if (player_cache[player_id].nick) free(player_cache[player_id].nick);
-                                player_cache[player_id].nick = _strdup(nickname.c_str());
+                                player_cache[player_id].nick = grcStrdup(nickname.c_str());
                                 if (on_player_prop_changed) {
                                     pushEvent([this, player_id, nickname]() {
                                         on_player_prop_changed(player_id, "nick", nickname.c_str(), on_player_prop_changed_data);
@@ -1195,19 +1215,19 @@ struct RCConnection {
                                     if (p.account) free(p.account);
                                     if (p.nick) free(p.nick);
                                     if (p.level) free(p.level);
-                                    p.account = _strdup(account.c_str());
-                                    p.nick = _strdup(nickname.c_str());
-                                    p.level = level.empty() ? nullptr : _strdup(level.c_str());
+                                    p.account = grcStrdup(account.c_str());
+                                    p.nick = grcStrdup(nickname.c_str());
+                                    p.level = level.empty() ? nullptr : grcStrdup(level.c_str());
                                     found = true;
                                     break;
                                 }
                             }
                             if (!found) {
                                 RCPlayer player;
-                                player.account = _strdup(account.c_str());
+                                player.account = grcStrdup(account.c_str());
                                 player.id = player_id;
-                                player.nick = _strdup(nickname.c_str());
-                                player.level = level.empty() ? nullptr : _strdup(level.c_str());
+                                player.nick = grcStrdup(nickname.c_str());
+                                player.level = level.empty() ? nullptr : grcStrdup(level.c_str());
                                 player_cache.push_back(player);
                             }
                             if (on_player_joined) {
@@ -1770,7 +1790,7 @@ struct RCConnection {
 
                             if (!server_name.empty() && !display_name.empty()) {
                                 RCServer server;
-                                server.name = _strdup(display_name.c_str());
+                                server.name = grcStrdup(display_name.c_str());
                                 server.players = player_count;
                                 server_cache.push_back(server);
                             }
@@ -1965,9 +1985,9 @@ struct RCConnection {
                     std::string weapon_name(packet.begin() + offset, packet.begin() + offset + name_len);
                     offset += name_len;
                     RCWeapon weapon;
-                    weapon.name = _strdup(weapon_name.c_str());
-                    weapon.image = _strdup("");
-                    weapon.script = _strdup("");
+                    weapon.name = grcStrdup(weapon_name.c_str());
+                    weapon.image = grcStrdup("");
+                    weapon.script = grcStrdup("");
                     {
                         std::lock_guard<std::mutex> lock(cache_mutex);
                         weapon_cache.push_back(weapon);
@@ -1993,8 +2013,8 @@ struct RCConnection {
                             }
                             if (!exists) {
                                 RCClass cls;
-                                cls.name = _strdup(class_name.c_str());
-                                cls.script = _strdup("");
+                                cls.name = grcStrdup(class_name.c_str());
+                                cls.script = grcStrdup("");
                                 class_cache.push_back(cls);
                             }
                         }
@@ -2070,7 +2090,7 @@ struct RCConnection {
                     for (auto& weapon : weapon_cache) {
                         if (strcmp(weapon.name, weapon_name.c_str()) == 0) {
                             if (weapon.script) free(weapon.script);
-                            weapon.script = _strdup(script.c_str());
+                            weapon.script = grcStrdup(script.c_str());
                             break;
                         }
                     }
@@ -2128,10 +2148,10 @@ struct RCConnection {
                     }
                     RCNPC npc;
                     npc.id = npc_id;
-                    npc.name = _strdup(name.c_str());
-                    npc.type = _strdup(type.c_str());
-                    npc.image = _strdup("");
-                    npc.script = _strdup("");
+                    npc.name = grcStrdup(name.c_str());
+                    npc.type = grcStrdup(type.c_str());
+                    npc.image = grcStrdup("");
+                    npc.script = grcStrdup("");
                     {
                         std::lock_guard<std::mutex> lock(cache_mutex);
                         npc_cache.push_back(npc);
@@ -2182,7 +2202,7 @@ struct RCConnection {
                         if (npc.id == npc_id) {
                             if (npc.name) npc_name = npc.name;
                             if (npc.script) free(npc.script);
-                            npc.script = _strdup(script.c_str());
+                            npc.script = grcStrdup(script.c_str());
                             break;
                         }
                     }
@@ -2230,7 +2250,7 @@ struct RCConnection {
                         for (auto& cls : class_cache) {
                             if (strcmp(cls.name, class_name.c_str()) == 0) {
                                 if (cls.script) free(cls.script);
-                                cls.script = _strdup(script.c_str());
+                                cls.script = grcStrdup(script.c_str());
                                 break;
                             }
                         }
@@ -2401,12 +2421,12 @@ int rc_get_servers(RCHandle handle, RCServer** servers_out) {
     conn->server_cache.clear();
     for (const auto& server : conn->servers) {
         RCServer rc_server;
-        rc_server.name = strdup(server.name.c_str());
-        rc_server.ip = strdup(server.ip.c_str());
+        rc_server.name = grcStrdup(server.name.c_str());
+        rc_server.ip = grcStrdup(server.ip.c_str());
         rc_server.port = server.port;
         rc_server.players = server.players;
-        rc_server.language = strdup(server.language.c_str());
-        rc_server.description = strdup(server.description.c_str());
+        rc_server.language = grcStrdup(server.language.c_str());
+        rc_server.description = grcStrdup(server.description.c_str());
         conn->server_cache.push_back(rc_server);
     }
     *servers_out = conn->server_cache.data();
@@ -2823,7 +2843,7 @@ char* rc_get_cached_npc_flags(RCHandle handle, int npc_id) {
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
     auto it = conn->npc_flags_cache.find(npc_id);
     if (it == conn->npc_flags_cache.end()) return nullptr;
-    return _strdup(it->second.c_str());
+    return grcStrdup(it->second.c_str());
 }
 int rc_get_filebrowser_folders(RCHandle handle, RCFileBrowserFolder** folders_out) {
     if (!handle || !folders_out) return 0;
@@ -2832,8 +2852,8 @@ int rc_get_filebrowser_folders(RCHandle handle, RCFileBrowserFolder** folders_ou
     conn->clearFileBrowserFolderView();
     for (auto& folder : conn->filebrowser_folders) {
         RCFileBrowserFolder item;
-        item.rights = _strdup(folder.rights.c_str());
-        item.pattern = _strdup(folder.pattern.c_str());
+        item.rights = grcStrdup(folder.rights.c_str());
+        item.pattern = grcStrdup(folder.pattern.c_str());
         conn->filebrowser_folder_view.push_back(item);
     }
     *folders_out = conn->filebrowser_folder_view.data();
@@ -2846,8 +2866,8 @@ int rc_get_filebrowser_files(RCHandle handle, RCFileBrowserEntry** entries_out) 
     conn->clearFileBrowserFileView();
     for (auto& file : conn->filebrowser_files) {
         RCFileBrowserEntry item;
-        item.path = _strdup(file.path.c_str());
-        item.rights = _strdup(file.rights.c_str());
+        item.path = grcStrdup(file.path.c_str());
+        item.rights = grcStrdup(file.rights.c_str());
         item.size = file.size;
         item.modified = file.modified;
         item.is_directory = file.is_directory;
@@ -2866,8 +2886,8 @@ int rc_copy_filebrowser_folders(RCHandle handle, RCFileBrowserFolder** folders_o
     RCFileBrowserFolder* folders = static_cast<RCFileBrowserFolder*>(calloc(count, sizeof(RCFileBrowserFolder)));
     if (!folders) return 0;
     for (int i = 0; i < count; ++i) {
-        folders[i].rights = _strdup(conn->filebrowser_folders[i].rights.c_str());
-        folders[i].pattern = _strdup(conn->filebrowser_folders[i].pattern.c_str());
+        folders[i].rights = grcStrdup(conn->filebrowser_folders[i].rights.c_str());
+        folders[i].pattern = grcStrdup(conn->filebrowser_folders[i].pattern.c_str());
     }
     *folders_out = folders;
     return count;
@@ -2886,8 +2906,8 @@ int rc_copy_filebrowser_files(RCHandle handle, RCFileBrowserEntry** entries_out)
     if (!entries) { writeNativeTrace("copy_files: calloc FAILED"); return 0; }
     writeNativeTrace("copy_files: calloc returned " + std::to_string((size_t)entries));
     for (int i = 0; i < count; ++i) {
-        entries[i].path = _strdup(conn->filebrowser_files[i].path.c_str());
-        entries[i].rights = _strdup(conn->filebrowser_files[i].rights.c_str());
+        entries[i].path = grcStrdup(conn->filebrowser_files[i].path.c_str());
+        entries[i].rights = grcStrdup(conn->filebrowser_files[i].rights.c_str());
         entries[i].size = conn->filebrowser_files[i].size;
         entries[i].modified = conn->filebrowser_files[i].modified;
         entries[i].is_directory = conn->filebrowser_files[i].is_directory;
@@ -2920,19 +2940,19 @@ char* rc_get_server_options(RCHandle handle) {
     if (!handle) return nullptr;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    return _strdup(conn->server_options.c_str());
+    return grcStrdup(conn->server_options.c_str());
 }
 char* rc_get_server_flags(RCHandle handle) {
     if (!handle) return nullptr;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    return _strdup(conn->server_flags.c_str());
+    return grcStrdup(conn->server_flags.c_str());
 }
 char* rc_get_folder_config(RCHandle handle) {
     if (!handle) return nullptr;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    return _strdup(conn->folder_config.c_str());
+    return grcStrdup(conn->folder_config.c_str());
 }
 long long rc_get_max_upload_file_size(RCHandle handle) {
     if (!handle) return 0;
@@ -3383,18 +3403,18 @@ int rc_send_nc_packet(RCHandle handle, int packet_id, const char* data, int leng
 char* rc_gtokenize(const char* text) {
     if (!text) return nullptr;
     std::string result = grc::gtokenizeString(text);
-    return _strdup(result.c_str());
+    return grcStrdup(result.c_str());
 }
 char* rc_gtokenize_reverse(const char* content) {
     if (!content) return nullptr;
     std::string result = grc::gtokenizeReverseString(content);
-    return _strdup(result.c_str());
+    return grcStrdup(result.c_str());
 }
 GRCLIB_API char* rc_get_1plus_text_net_string(const char* text) {
     if (!text) return nullptr;
     std::string s(text);
-    if (s.length() > 223) return _strdup((std::string(1, (char)255) + s.substr(223)).c_str());
-    return _strdup((std::string(1, (char)(32 + s.length())) + s).c_str());
+    if (s.length() > 223) return grcStrdup((std::string(1, (char)255) + s.substr(223)).c_str());
+    return grcStrdup((std::string(1, (char)(32 + s.length())) + s).c_str());
 }
 GRCLIB_API int rc_read_gbyte(const char* data, int length, int offset, int* value_out, int* offset_out) {
     if (!data || !value_out || !offset_out || offset < 0 || offset >= length) return 0;
@@ -3427,7 +3447,7 @@ GRCLIB_API char* rc_read_length_string(const char* data, int length, int offset,
     std::string result(data + offset, str_len);
     *offset_out = offset + str_len;
     if (result.empty()) return nullptr;
-    return _strdup(result.c_str());
+    return grcStrdup(result.c_str());
 }
 GRCLIB_API char* rc_read_comma_text(const char* data, int length, int offset, int read_length) {
     if (!data || offset < 0 || offset >= length) return nullptr;
@@ -3438,7 +3458,7 @@ GRCLIB_API char* rc_read_comma_text(const char* data, int length, int offset, in
     size_t off = 0;
     std::string result = grc::readCommaText(text_vec, off, actual_len);
     if (result.empty()) return nullptr;
-    return _strdup(result.c_str());
+    return grcStrdup(result.c_str());
 }
 int rc_filebrowser_start(RCHandle handle) {
     if (!handle) return 0;
@@ -3864,7 +3884,7 @@ char* rc_format_player_rights_text(int rights_value, const char* ip_range, const
         text << rights_names[i] << ": " << (((rights_value & (1 << i)) != 0) ? "true" : "false") << "\n";
     }
     text << "\nFolder Access:\n" << (folder_access ? folder_access : "") << "\n";
-    return _strdup(text.str().c_str());
+    return grcStrdup(text.str().c_str());
 }
 
 char* rc_format_player_account_text(const char* account_data) {
@@ -3885,7 +3905,7 @@ char* rc_format_player_account_text(const char* account_data) {
     text << "Guest: " << (values["guest"] == "1" || values["guest"] == "true" ? "true" : "false") << "\n";
     text << "Ban Time: Wed Dec 31 18:00:00 1969\n";
     text << "Ban-Reason / Comments: " << values["ban_reason"] << "\n";
-    return _strdup(text.str().c_str());
+    return grcStrdup(text.str().c_str());
 }
 
 char* rc_format_player_attributes_text(const char* properties_json) {
@@ -3939,7 +3959,7 @@ char* rc_format_player_attributes_text(const char* properties_json) {
     for (const auto& weapon : jsonGetStringArray(json, "weapons")) text << weapon << "\n";
     text << "\n[Script Flags]\n";
     for (const auto& flag : jsonGetStringArray(json, "flags")) text << flag << "\n";
-    return _strdup(text.str().c_str());
+    return grcStrdup(text.str().c_str());
 }
 
 char* rc_parse_player_rights_text(const char* text_ptr) {
@@ -3989,7 +4009,7 @@ char* rc_parse_player_rights_text(const char* text_ptr) {
     out << "rights=" << rights_value << "\n";
     out << "ip=" << ip_range << "\n";
     out << "folders=" << joinLines(folder_access);
-    return _strdup(out.str().c_str());
+    return grcStrdup(out.str().c_str());
 }
 
 char* rc_parse_player_account_text(const char* text_ptr) {
@@ -4029,7 +4049,7 @@ char* rc_parse_player_account_text(const char* text_ptr) {
 
     std::ostringstream out;
     for (const auto& item : values) out << item.first << "=" << item.second << "\n";
-    return _strdup(out.str().c_str());
+    return grcStrdup(out.str().c_str());
 }
 
 char* rc_parse_player_attributes_text(const char* text_ptr) {
@@ -4113,7 +4133,7 @@ char* rc_parse_player_attributes_text(const char* text_ptr) {
     jsonAddStringArray(json, first, "chests", chests);
     jsonAddStringArray(json, first, "weapons", weapons);
     jsonAddStringArray(json, first, "flags", flags);
-    return _strdup(("{" + json.str() + "}").c_str());
+    return grcStrdup(("{" + json.str() + "}").c_str());
 }
 
 int rc_is_new_protocol(RCHandle handle) {

@@ -4,7 +4,7 @@
 
 Python, C#, Rust, or any other client should call typed functions and callbacks instead of building or parsing raw protocol packets itself.
 
-On Windows, the game-server login PCID matches native RC behavior using the same machine-id sources and reversed-per-byte MD5 rendering expected by compatible servers.
+The game-server login PCID uses stable machine-id sources and reversed-per-byte MD5 rendering expected by compatible servers. Windows uses the native RC sources; Linux/macOS use local machine, network, and root-device identifiers.
 
 License: LGPL-2.0-only. See `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
@@ -17,7 +17,14 @@ cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 cmake --build build --config Release
 ```
 
-The build outputs `build\Release\grclib.dll`. Copy that DLL next to the wrapper or application that loads it.
+Linux/macOS with CMake:
+
+```sh
+cmake -S . -B build
+cmake --build build --config Release
+```
+
+The build outputs a shared library in the build directory (`grclib.dll`, `libgrclib.so`, or `libgrclib.dylib`, depending on platform). Copy it next to the wrapper or application that loads it.
 
 ## Public Contract
 
