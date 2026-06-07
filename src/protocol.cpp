@@ -23,6 +23,8 @@
 #include <sys/stat.h>
 #include <ifaddrs.h>
 #ifdef __linux__
+#include <sys/ioctl.h>
+#include <net/if.h>
 #include <netpacket/packet.h>
 #endif
 #ifdef __APPLE__
@@ -203,9 +205,27 @@ static std::string md5RevHex(const uint8_t* data, size_t length) {
     return output;
 }
 
+static std::string md5Hex(const uint8_t* data, size_t length) {
+    if (!data && length > 0) return "";
+    std::array<uint8_t, 16> digest = md5Digest(data, length);
+    std::string output;
+    static const char* hex = "0123456789abcdef";
+    output.reserve(32);
+    for (uint8_t b : digest) {
+        output += hex[(b >> 4) & 0x0f];
+        output += hex[b & 0x0f];
+    }
+    return output;
+}
+
 static std::string md5RevHex(const std::vector<uint8_t>& data) {
     if (data.empty()) return "";
     return md5RevHex(data.empty() ? nullptr : data.data(), data.size());
+}
+
+static std::string md5Hex(const std::vector<uint8_t>& data) {
+    if (data.empty()) return "";
+    return md5Hex(data.empty() ? nullptr : data.data(), data.size());
 }
 
 static std::vector<uint8_t> readWindowsDigitalProductId() {
@@ -252,6 +272,24 @@ static std::vector<uint8_t> readWindowsDigitalProductId() {
     }
     char host[256] = {0};
     if (gethostname(host, sizeof(host) - 1) == 0 && host[0]) result.assign(host, host + strlen(host));
+#endif
+    return result;
+}
+
+static std::vector<uint8_t> readLinuxEth0MacAddress() {
+    std::vector<uint8_t> result;
+#ifdef __linux__
+    int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd < 0) return result;
+
+    struct ifreq request;
+    memset(&request, 0, sizeof(request));
+    strncpy(request.ifr_name, "eth0", IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFHWADDR, &request) == 0) {
+        const uint8_t* mac = (const uint8_t*)request.ifr_hwaddr.sa_data;
+        result.assign(mac, mac + 6);
+    }
+    closesocket(fd);
 #endif
     return result;
 }
@@ -319,6 +357,18 @@ static std::vector<uint8_t> readFirstValidMacAddress() {
     return result;
 }
 
+static std::vector<uint8_t> readLinuxEtcInodeBytes() {
+    std::vector<uint8_t> result;
+#ifdef __linux__
+    struct stat info;
+    if (stat("/etc", &info) == 0) {
+        uint64_t value = (uint64_t)info.st_ino;
+        for (int i = 0; i < 4; ++i) result.push_back((uint8_t)((value >> (8 * i)) & 0xff));
+    }
+#endif
+    return result;
+}
+
 static std::vector<uint8_t> readVolumeSerialBytes() {
     std::vector<uint8_t> result;
 #ifdef _WIN32
@@ -341,10 +391,21 @@ static std::vector<uint8_t> readVolumeSerialBytes() {
 }
 
 static std::string generatePcidList() {
+#ifdef _WIN32
     std::string windows_id = md5RevHex(readWindowsDigitalProductId());
     std::string network_id = md5RevHex(readFirstValidMacAddress());
     std::string harddisk_id = md5RevHex(readVolumeSerialBytes());
     return "win," + windows_id + "," + network_id + "," + harddisk_id;
+#elif defined(__linux__)
+    std::string network_id = md5Hex(readLinuxEth0MacAddress());
+    std::string system_id = md5Hex(readLinuxEtcInodeBytes());
+    return "linux," + network_id + "," + system_id + ",";
+#else
+    std::string machine_id = md5RevHex(readWindowsDigitalProductId());
+    std::string network_id = md5RevHex(readFirstValidMacAddress());
+    std::string disk_id = md5RevHex(readVolumeSerialBytes());
+    return "mac," + machine_id + "," + network_id + "," + disk_id;
+#endif
 }
 static std::string gtokenize(const std::string& text) {
     std::string cleaned = text;
