@@ -5,7 +5,11 @@ import time
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DLL_PATH = os.path.join(ROOT, "build", "Release", "grclib.dll")
+LIBRARY_NAMES = {
+    "win32": "grclib.dll",
+    "darwin": "grclib.dylib",
+}
+DLL_PATH = os.path.join(ROOT, "bin", LIBRARY_NAMES.get(sys.platform, "grclib.so"))
 
 
 class RCServer(ctypes.Structure):

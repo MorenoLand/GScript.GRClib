@@ -1,4 +1,5 @@
 build/
+bin/
 backups/
 __pycache__/
 *.py[cod]

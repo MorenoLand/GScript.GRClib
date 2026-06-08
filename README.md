@@ -24,7 +24,7 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
-The build outputs a shared library in the build directory (`grclib.dll`, `grclib.so`, or `grclib.dylib`, depending on platform). Copy it next to the wrapper or application that loads it.
+The build outputs the shared library to `bin/` in the repository root (`grclib.dll`, `grclib.so`, or `grclib.dylib`, depending on platform). Copy it next to the wrapper or application that loads it.
 
 ## Public Contract
 

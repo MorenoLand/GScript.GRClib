@@ -6,6 +6,7 @@
 #include <array>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -44,36 +45,40 @@
 #define MINIZ_NO_STDIO
 #define MINIZ_NO_TIME
 extern "C" {
-#include "../deps/miniz_tdef.c"
-#include "../deps/miniz_tinfl.c"
-#include "../deps/miniz.c"
+#include "../deps/miniz/src/miniz_tdef.c"
+#include "../deps/miniz/src/miniz_tinfl.c"
+#include "../deps/miniz/src/miniz.c"
+#include "../deps/bzip2/include/bzlib.h"
 }
-#include "../deps/micro-bunzip.c"
 namespace grc {
 static std::vector<uint8_t> bzip2Decompress(const uint8_t* data, size_t size) {
-    bunzip_data *bd = nullptr;
-    std::vector<uint8_t> result;
-    int ret = start_bunzip(&bd, -1, (char*)data, size);
-    if (ret != RETVAL_OK) {
-        if (bd) {
-            if (bd->dbuf) free(bd->dbuf);
-            free(bd);
-        }
-        return result;
+    if (!data || size == 0 || size > static_cast<size_t>((std::numeric_limits<unsigned int>::max)())) {
+        return std::vector<uint8_t>();
     }
-    while (true) {
-        char outbuf[IOBUF_SIZE];
-        memset(outbuf, 0, IOBUF_SIZE);
-        int got = write_bunzip_data(bd, -1, outbuf, IOBUF_SIZE);
-        if (got < 0) {
-            if (got == RETVAL_LAST_BLOCK && bd->headerCRC == bd->totalCRC) break;
+    unsigned int source_len = static_cast<unsigned int>(size);
+    size_t initial_size = size * 8;
+    if (initial_size < 4096) initial_size = 4096;
+    unsigned int dest_len = static_cast<unsigned int>(initial_size);
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        std::vector<uint8_t> result(dest_len);
+        unsigned int actual_len = dest_len;
+        int ret = BZ2_bzBuffToBuffDecompress(
+            reinterpret_cast<char*>(result.data()),
+            &actual_len,
+            const_cast<char*>(reinterpret_cast<const char*>(data)),
+            source_len,
+            0,
+            0);
+        if (ret == BZ_OK) {
+            result.resize(actual_len);
+            return result;
+        }
+        if (ret != BZ_OUTBUFF_FULL || dest_len > ((std::numeric_limits<unsigned int>::max)() / 2)) {
             break;
         }
-        if (got > 0) result.insert(result.end(), outbuf, outbuf + got);
+        dest_len *= 2;
     }
-    if (bd->dbuf) free(bd->dbuf);
-    free(bd);
-    return result;
+    return std::vector<uint8_t>();
 }
 static uint8_t writeGByte(int value) { return (value & 0xFF) + 0x20; }
 static int decodeGByte(uint8_t byte) { return (byte & 0xFF) - 0x20; }

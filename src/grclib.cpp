@@ -1,4 +1,4 @@
-#include "grclib.h"
+#include <grclib.h>
 #include "protocol.cpp"
 #include "IEnums.h"
 #include <thread>
@@ -732,6 +732,56 @@ struct RCConnection {
                 }
                 break;
             }
+            case PLO_FILEUPTODATE: { // 45 - File download complete in RC file-browser transfers
+                std::string filename(packet.begin() + offset, packet.end());
+                size_t newline_pos = filename.find('\n');
+                if (newline_pos != std::string::npos) filename = filename.substr(0, newline_pos);
+
+                std::string transfer_key;
+                std::string content;
+                {
+                    std::lock_guard<std::mutex> lock(transfer_mutex);
+                    if (!pending_file_download.empty() && file_transfers.count(pending_file_download)) {
+                        transfer_key = pending_file_download;
+                    } else if (file_transfers.count(filename)) {
+                        transfer_key = filename;
+                    } else if (!filename.empty()) {
+                        size_t slash = filename.find_last_of("/\\");
+                        std::string basename = slash == std::string::npos ? filename : filename.substr(slash + 1);
+                        for (const auto& pair : file_transfers) {
+                            size_t key_slash = pair.first.find_last_of("/\\");
+                            std::string key_basename = key_slash == std::string::npos ? pair.first : pair.first.substr(key_slash + 1);
+                            if (key_basename == basename) {
+                                transfer_key = pair.first;
+                                break;
+                            }
+                        }
+                    } else if (file_transfers.size() == 1) {
+                        transfer_key = file_transfers.begin()->first;
+                    }
+                    if (!transfer_key.empty() && file_transfers[transfer_key].received > 0) {
+                        auto& transfer = file_transfers[transfer_key];
+                        content.assign(reinterpret_cast<const char*>(transfer.buffer.data()), transfer.buffer.size());
+                        file_transfers.erase(transfer_key);
+                    }
+                    if (!pending_file_download.empty() && (filename.empty() || pending_file_download == filename || pending_file_download == transfer_key)) {
+                        pending_file_download.clear();
+                    }
+                }
+
+                if (!transfer_key.empty() && !content.empty()) {
+                    if (on_filebrowser_message) {
+                        std::string msg = "File complete: " + transfer_key;
+                        pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:file_complete");
+                    }
+                    if (on_file_received) {
+                        pushEvent([this, transfer_key, content]() {
+                            on_file_received(transfer_key.c_str(), content.c_str(), content.length(), on_file_received_data);
+                        }, "file_received:file_complete:" + transfer_key);
+                    }
+                }
+                break;
+            }
             case PLO_BOMBADD: {
                 emitServerDataPacket("bombadd", offset);
                 break;
@@ -867,8 +917,16 @@ struct RCConnection {
                             int nick_len = grc::decodeGByte(packet[offset++]);
                             if (offset + nick_len <= packet.size()) {
                                 std::string nickname(packet.begin() + offset, packet.begin() + offset + nick_len);
-                                if (player_cache[player_id].nick) free(player_cache[player_id].nick);
-                                player_cache[player_id].nick = grcStrdup(nickname.c_str());
+                                {
+                                    std::lock_guard<std::mutex> lock(cache_mutex);
+                                    for (auto& player : player_cache) {
+                                        if (player.id == player_id) {
+                                            if (player.nick) free(player.nick);
+                                            player.nick = grcStrdup(nickname.c_str());
+                                            break;
+                                        }
+                                    }
+                                }
                                 if (on_player_prop_changed) {
                                     pushEvent([this, player_id, nickname]() {
                                         on_player_prop_changed(player_id, "nick", nickname.c_str(), on_player_prop_changed_data);
@@ -1471,7 +1529,65 @@ struct RCConnection {
                     }
                 }
                 if (payload.empty()) break;
-                writeNativeTrace("pkt66: payload size after decode=" + std::to_string(payload.size()) + " first_bytes=" + std::to_string(payload.size()>0?payload[0]:0) + "," + std::to_string(payload.size()>1?payload[1]:0));
+                if (payload[0] == 132) {
+                    if (payload.size() < 5) break;
+                    int raw_length = ((payload[1] - 32) << 14) + ((payload[2] - 32) << 7) + (payload[3] - 32);
+                    if (raw_length < 0 || payload.size() < 5 + static_cast<size_t>(raw_length)) break;
+                    payload = std::vector<uint8_t>(payload.begin() + 5, payload.begin() + 5 + raw_length);
+                    if (!payload.empty() && payload.back() == 0x0A) payload.pop_back();
+                    writeNativeTrace("PLO_RC_FILEBROWSER_DIR: unwrapped raw packet len=" + std::to_string(payload.size()) + " first=" + std::to_string(payload.empty() ? 0 : payload[0]));
+                }
+                if (!payload.empty() && payload[0] == grc::writeGByte(PLO_LARGEFILESTART)) {
+                    std::vector<uint8_t> filename_bytes(payload.begin() + 1, payload.end());
+                    size_t name_end = 0;
+                    while (name_end < filename_bytes.size() &&
+                           filename_bytes[name_end] != 0 &&
+                           filename_bytes[name_end] != '\n' &&
+                           filename_bytes[name_end] != '\r') {
+                        ++name_end;
+                    }
+                    std::string filename(filename_bytes.begin(), filename_bytes.begin() + name_end);
+                    std::string full_path;
+                    {
+                        std::lock_guard<std::mutex> lock(transfer_mutex);
+                        pending_file_download = filename;
+                        full_path = pending_file_download.empty() ? filename : pending_file_download;
+                    }
+                    size_t content_offset = 1 + name_end + 1;
+                    if (content_offset < payload.size()) {
+                        std::vector<uint8_t> remaining(payload.begin() + content_offset, payload.end());
+                        std::vector<uint8_t> actual_content;
+                        if (!remaining.empty() && remaining[0] == grc::writeGByte(PLO_FILE) && remaining.size() >= 7) {
+                            size_t embedded_offset = 1 + 5;
+                            int embedded_name_len = grc::decodeGByte(remaining[embedded_offset++]);
+                            if (embedded_name_len >= 0 && embedded_offset + static_cast<size_t>(embedded_name_len) <= remaining.size()) {
+                                embedded_offset += embedded_name_len;
+                                actual_content.assign(remaining.begin() + embedded_offset, remaining.end());
+                            }
+                        } else if (remaining.size() > 1000) {
+                            auto name_it = std::search(remaining.begin(), remaining.end(), filename.begin(), filename.end());
+                            if (name_it != remaining.end()) {
+                                actual_content.assign(name_it + filename.size(), remaining.end());
+                            } else {
+                                actual_content = remaining;
+                            }
+                        }
+                        if (!actual_content.empty()) {
+                            std::lock_guard<std::mutex> lock(transfer_mutex);
+                            file_transfers[full_path] = FileTransfer{actual_content, 0, actual_content.size()};
+                        }
+                    }
+                    if (on_filebrowser_message) {
+                        std::string msg = "Bigfile transfer started: " + filename;
+                        pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:PLO_RC_FILEBROWSER_DIR_largefile_start");
+                    }
+                    break;
+                }
+                if (!payload.empty() && payload[0] == grc::writeGByte(PLO_FILE)) {
+                    processPacket(payload);
+                    break;
+                }
+                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: payload size after decode=" + std::to_string(payload.size()) + " first_bytes=" + std::to_string(payload.size()>0?payload[0]:0) + "," + std::to_string(payload.size()>1?payload[1]:0));
                 size_t parse_offset = 0;
                 int folder_len = grc::decodeGByte(payload[parse_offset++]);
                 if (folder_len < 0 || parse_offset + static_cast<size_t>(folder_len) > payload.size()) break;
@@ -1511,13 +1627,13 @@ struct RCConnection {
                 }
 
                 int count = static_cast<int>(files.size());
-                writeNativeTrace("pkt66: parsed " + std::to_string(count) + " files for " + folder_path);
+                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: parsed " + std::to_string(count) + " files for " + folder_path);
                 {
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     filebrowser_current_folder = folder_path;
                     filebrowser_files = files;
                 }
-                writeNativeTrace("pkt66: cache updated, pushing callback");
+                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: cache updated, pushing callback");
                 if (on_filebrowser_files) {
                     pushEvent([this, folder_path, count]() {
                         on_filebrowser_files(folder_path.c_str(), count, on_filebrowser_files_data);
@@ -1873,6 +1989,8 @@ struct RCConnection {
                             // Check if this is part of a big file transfer
                             std::string transfer_key;
                             std::string chunk_msg;
+                            size_t chunk_received = 0;
+                            size_t chunk_total = 0;
                             {
                                 std::lock_guard<std::mutex> lock(transfer_mutex);
                                 if (file_transfers.count(filename)) transfer_key = filename;
@@ -1882,6 +2000,8 @@ struct RCConnection {
                                     transfer.buffer.insert(transfer.buffer.end(), content.begin(), content.end());
                                     transfer.received += content.size();
                                     chunk_msg = "Received chunk: " + std::to_string(transfer.received) + "/" + std::to_string(transfer.size) + " bytes for " + filename;
+                                    chunk_received = transfer.received;
+                                    chunk_total = transfer.size;
                                 }
                             }
                             if (!transfer_key.empty()) {
@@ -1889,6 +2009,7 @@ struct RCConnection {
                                     std::string msg = chunk_msg;
                                     pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:file_chunk");
                                 }
+                                completeTransferIfReady(transfer_key, chunk_received, chunk_total, "file_chunk_size_complete");
                             } else {
                                 // Single-packet file download
                                 if (on_file_received) {
@@ -1905,6 +2026,188 @@ struct RCConnection {
             }
         }
         writeNativeTrace("RECV_THREAD: processPacket done id=" + std::to_string((int)packet_id));
+    }
+    bool hasActiveLargeFileTransfer() {
+        std::lock_guard<std::mutex> lock(transfer_mutex);
+        for (const auto& pair : file_transfers) {
+            if (pair.second.size > 0) return true;
+        }
+        return false;
+    }
+    bool isLargeFileEndFrame(const std::vector<uint8_t>& data) {
+        if (data.size() < 2 || grc::decodeGByte(data[0]) != PLO_LARGEFILEEND) return false;
+        size_t term_pos = 1;
+        while (term_pos < data.size() && data[term_pos] != 0x0A) term_pos++;
+        if (term_pos >= data.size()) return false;
+        if (term_pos + 1 != data.size()) return false;
+        std::string filename(data.begin() + 1, data.begin() + term_pos);
+        size_t newline_pos = filename.find('\n');
+        if (newline_pos != std::string::npos) filename = filename.substr(0, newline_pos);
+        std::lock_guard<std::mutex> lock(transfer_mutex);
+        if (!pending_file_download.empty()) {
+            if (filename == pending_file_download) return true;
+            size_t slash = pending_file_download.find_last_of("/\\");
+            std::string basename = slash == std::string::npos ? pending_file_download : pending_file_download.substr(slash + 1);
+            if (filename == basename) return true;
+        }
+        return file_transfers.count(filename) > 0;
+    }
+    bool looksLikeFramedPacketData(const std::vector<uint8_t>& data) {
+        if (data.empty()) return false;
+        size_t offset = 0;
+        bool saw_packet = false;
+        while (offset < data.size()) {
+            if (data[offset] == 132) {
+                if (offset + 5 > data.size()) return false;
+                int raw_length = ((data[offset + 1] - 32) << 14) + ((data[offset + 2] - 32) << 7) + (data[offset + 3] - 32);
+                if (raw_length < 0 || offset + 5 + static_cast<size_t>(raw_length) > data.size()) return false;
+                saw_packet = true;
+                offset += 5 + static_cast<size_t>(raw_length);
+                continue;
+            }
+            size_t term_pos = offset;
+            while (term_pos < data.size() && data[term_pos] != 0x0A) term_pos++;
+            if (term_pos >= data.size()) return false;
+            if (term_pos == offset) return false;
+            if (data[offset] < 32) return false;
+            saw_packet = true;
+            offset = term_pos + 1;
+        }
+        return saw_packet;
+    }
+    bool appendActiveLargeFileChunk(const std::vector<uint8_t>& data) {
+        if (data.empty()) return false;
+        std::string transfer_key;
+        size_t received = 0;
+        size_t total = 0;
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            if (!pending_file_download.empty()) {
+                auto it = file_transfers.find(pending_file_download);
+                if (it != file_transfers.end() && it->second.size > 0) {
+                    transfer_key = pending_file_download;
+                }
+            }
+            if (transfer_key.empty()) {
+                for (const auto& pair : file_transfers) {
+                    if (pair.second.size > 0) {
+                        transfer_key = pair.first;
+                        break;
+                    }
+                }
+            }
+            if (transfer_key.empty()) return false;
+
+            auto& transfer = file_transfers[transfer_key];
+            transfer.buffer.insert(transfer.buffer.end(), data.begin(), data.end());
+            transfer.received += data.size();
+            received = transfer.received;
+            total = transfer.size;
+        }
+        if (on_filebrowser_message) {
+            std::string msg = "Received chunk: " + std::to_string(received) + "/" + std::to_string(total) + " bytes for " + transfer_key;
+            pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:largefile_raw_chunk");
+        }
+        completeTransferIfReady(transfer_key, received, total, "largefile_size_complete");
+        return true;
+    }
+    std::string pendingDownloadPath() {
+        std::lock_guard<std::mutex> lock(transfer_mutex);
+        return pending_file_download;
+    }
+    size_t expectedDownloadSize(const std::string& path) {
+        if (path.empty()) return 0;
+        size_t slash = path.find_last_of("/\\");
+        std::string basename = slash == std::string::npos ? path : path.substr(slash + 1);
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        for (const auto& entry : filebrowser_files) {
+            if (entry.is_directory) continue;
+            if (entry.path == path || entry.path == basename) return entry.size > 0 ? static_cast<size_t>(entry.size) : 0;
+            if (!filebrowser_current_folder.empty()) {
+                std::string full = filebrowser_current_folder + entry.path;
+                if (full == path) return entry.size > 0 ? static_cast<size_t>(entry.size) : 0;
+            }
+        }
+        return 0;
+    }
+    bool emitPendingFilePayload(const std::string& path, const std::vector<uint8_t>& content, const char* trace_label) {
+        if (path.empty() || content.empty()) return false;
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            file_transfers.erase(path);
+            if (pending_file_download == path) pending_file_download.clear();
+        }
+        if (on_filebrowser_message) {
+            std::string msg = std::string("File downloaded: ") + path;
+            pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:pending_payload_done");
+        }
+        if (on_file_received) {
+            std::string content_str(reinterpret_cast<const char*>(content.data()), content.size());
+            pushEvent([this, path, content_str]() {
+                on_file_received(path.c_str(), content_str.c_str(), content_str.length(), on_file_received_data);
+            }, std::string("file_received:") + trace_label + ":" + path);
+        }
+        return true;
+    }
+    bool completeTransferIfReady(const std::string& path, size_t received, size_t total, const char* trace_label) {
+        if (path.empty() || total == 0 || received < total) return false;
+        std::vector<uint8_t> content;
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            auto it = file_transfers.find(path);
+            if (it == file_transfers.end() || it->second.received < it->second.size) return false;
+            content = it->second.buffer;
+        }
+        writeNativeTrace("recvLoop: completing transfer by size received=" + std::to_string(received) + " total=" + std::to_string(total) + " path=" + path);
+        return emitPendingFilePayload(path, content, trace_label);
+    }
+    bool handlePendingUnframedFilePayload(const std::vector<uint8_t>& data) {
+        if (data.empty()) return false;
+        std::string path = pendingDownloadPath();
+        if (path.empty()) return false;
+
+        std::vector<uint8_t> content;
+        if (grc::decodeGByte(data[0]) == PLO_LARGEFILESTART) {
+            size_t slash = path.find_last_of("/\\");
+            std::string basename = slash == std::string::npos ? path : path.substr(slash + 1);
+            size_t content_start = std::string::npos;
+            if (!basename.empty() && data.size() > 1 + basename.size() &&
+                std::equal(basename.begin(), basename.end(), data.begin() + 1)) {
+                content_start = 1 + basename.size();
+                if (content_start < data.size() && (data[content_start] == 0 || data[content_start] == '\n' || data[content_start] == '\r')) {
+                    ++content_start;
+                }
+            } else {
+                for (size_t i = 1; i < data.size(); ++i) {
+                    if (data[i] == 0 || data[i] == '\n' || data[i] == '\r') {
+                        content_start = i + 1;
+                        break;
+                    }
+                }
+            }
+            if (content_start == std::string::npos || content_start >= data.size()) return false;
+            content.assign(data.begin() + content_start, data.end());
+        } else {
+            content = data;
+        }
+
+        size_t expected_size = expectedDownloadSize(path);
+        if (expected_size == 0 || content.size() >= expected_size) {
+            writeNativeTrace("recvLoop: emitting pending unframed file payload len=" + std::to_string(content.size()) + " path=" + path);
+            return emitPendingFilePayload(path, content, "pending_unframed");
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            FileTransfer transfer = {content, expected_size, content.size()};
+            file_transfers[path] = transfer;
+        }
+        if (on_filebrowser_message) {
+            std::string msg = "Received chunk: " + std::to_string(content.size()) + "/" + std::to_string(expected_size) + " bytes for " + path;
+            pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:pending_unframed_chunk");
+        }
+        writeNativeTrace("recvLoop: stored pending unframed partial len=" + std::to_string(content.size()) + " expected=" + std::to_string(expected_size) + " path=" + path);
+        return true;
     }
     void clearWeaponCache() {
         std::lock_guard<std::mutex> lock(cache_mutex);
@@ -3012,6 +3315,7 @@ int rc_download_file(RCHandle handle, const char* path) {
     if (!conn->connected || !conn->authenticated) return 0;
     {
         std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+        conn->file_transfers.clear();
         conn->pending_file_download = path;
     }
     std::vector<uint8_t> data(path, path + strlen(path));
@@ -3490,6 +3794,7 @@ int rc_filebrowser_download(RCHandle handle, const char* file_path) {
     writeNativeTrace("rc_filebrowser_download: " + std::string(file_path));
     {
         std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+        conn->file_transfers.clear();
         conn->pending_file_download = file_path;
     }
     std::vector<uint8_t> data(file_path, file_path + strlen(file_path));

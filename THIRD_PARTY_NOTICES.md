@@ -4,16 +4,16 @@ grclib includes a small amount of bundled third-party source so the DLL can buil
 
 ## miniz
 
-Files: `deps/miniz*`
+Files: `deps/miniz/include/*`, `deps/miniz/src/*`
 
 License: public domain / Unlicense
 
 The original miniz notice is preserved in the bundled source files.
 
-## micro-bunzip
+## bzip2/libbz2
 
-File: `deps/micro-bunzip.c`
+Files: `deps/bzip2/include/*`, `deps/bzip2/src/*`
 
-License: GNU Library General Public License version 2
+License: bzip2 license
 
-The original micro-bunzip notice is preserved in the bundled source file.
+The original bzip2 license and README are preserved in the bundled source folder.
