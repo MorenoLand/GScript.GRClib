@@ -48,20 +48,6 @@ static bool validateHeap(const char* context) {
     return true;
 }
 
-static void writeNativeTrace(const std::string& message) {
-    FILE* f = nullptr;
-#ifdef _WIN32
-    if (fopen_s(&f, "native_grclib_trace.log", "ab") == 0 && f) {
-#else
-    f = fopen("native_grclib_trace.log", "ab");
-    if (f) {
-#endif
-        std::string line = message + "\n";
-        fwrite(line.data(), 1, line.size(), f);
-        fclose(f);
-    }
-}
-
 struct FileBrowserFolderCacheEntry {
     std::string rights;
     std::string pattern;
@@ -683,11 +669,6 @@ struct RCConnection {
         if (packet.empty()) return;
         uint8_t packet_id = grc::decodeGByte(packet[0]);
         size_t offset = 1;
-        writeNativeTrace("RECV_THREAD: processPacket id=" + std::to_string((int)packet_id) + " size=" + std::to_string(packet.size()));
-        if (on_filebrowser_message && (packet_id == PLO_RC_FILEBROWSER_DIRLIST || packet_id == PLO_RC_FILEBROWSER_DIR || packet_id == PLO_RC_FILEBROWSER_MESSAGE || packet_id == PLO_RAWDATA)) {
-            std::string msg = "File browser dispatch packet " + std::to_string((int)packet_id) + " (" + std::to_string(packet.size() - 1) + " bytes)";
-            pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); });
-        }
         auto emitServerDataPacket = [&](const char* data_type, size_t start_offset) {
             if (!on_server_data) return;
             if (start_offset > packet.size()) start_offset = packet.size();
@@ -1535,7 +1516,6 @@ struct RCConnection {
                     if (raw_length < 0 || payload.size() < 5 + static_cast<size_t>(raw_length)) break;
                     payload = std::vector<uint8_t>(payload.begin() + 5, payload.begin() + 5 + raw_length);
                     if (!payload.empty() && payload.back() == 0x0A) payload.pop_back();
-                    writeNativeTrace("PLO_RC_FILEBROWSER_DIR: unwrapped raw packet len=" + std::to_string(payload.size()) + " first=" + std::to_string(payload.empty() ? 0 : payload[0]));
                 }
                 if (!payload.empty() && payload[0] == grc::writeGByte(PLO_LARGEFILESTART)) {
                     std::vector<uint8_t> filename_bytes(payload.begin() + 1, payload.end());
@@ -1587,7 +1567,6 @@ struct RCConnection {
                     processPacket(payload);
                     break;
                 }
-                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: payload size after decode=" + std::to_string(payload.size()) + " first_bytes=" + std::to_string(payload.size()>0?payload[0]:0) + "," + std::to_string(payload.size()>1?payload[1]:0));
                 size_t parse_offset = 0;
                 int folder_len = grc::decodeGByte(payload[parse_offset++]);
                 if (folder_len < 0 || parse_offset + static_cast<size_t>(folder_len) > payload.size()) break;
@@ -1627,13 +1606,11 @@ struct RCConnection {
                 }
 
                 int count = static_cast<int>(files.size());
-                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: parsed " + std::to_string(count) + " files for " + folder_path);
                 {
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     filebrowser_current_folder = folder_path;
                     filebrowser_files = files;
                 }
-                writeNativeTrace("PLO_RC_FILEBROWSER_DIR: cache updated, pushing callback");
                 if (on_filebrowser_files) {
                     pushEvent([this, folder_path, count]() {
                         on_filebrowser_files(folder_path.c_str(), count, on_filebrowser_files_data);
@@ -2025,7 +2002,6 @@ struct RCConnection {
                 break;
             }
         }
-        writeNativeTrace("RECV_THREAD: processPacket done id=" + std::to_string((int)packet_id));
     }
     bool hasActiveLargeFileTransfer() {
         std::lock_guard<std::mutex> lock(transfer_mutex);
@@ -2158,7 +2134,6 @@ struct RCConnection {
             if (it == file_transfers.end() || it->second.received < it->second.size) return false;
             content = it->second.buffer;
         }
-        writeNativeTrace("recvLoop: completing transfer by size received=" + std::to_string(received) + " total=" + std::to_string(total) + " path=" + path);
         return emitPendingFilePayload(path, content, trace_label);
     }
     bool handlePendingUnframedFilePayload(const std::vector<uint8_t>& data) {
@@ -2193,7 +2168,6 @@ struct RCConnection {
 
         size_t expected_size = expectedDownloadSize(path);
         if (expected_size == 0 || content.size() >= expected_size) {
-            writeNativeTrace("recvLoop: emitting pending unframed file payload len=" + std::to_string(content.size()) + " path=" + path);
             return emitPendingFilePayload(path, content, "pending_unframed");
         }
 
@@ -2206,7 +2180,6 @@ struct RCConnection {
             std::string msg = "Received chunk: " + std::to_string(content.size()) + "/" + std::to_string(expected_size) + " bytes for " + path;
             pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:pending_unframed_chunk");
         }
-        writeNativeTrace("recvLoop: stored pending unframed partial len=" + std::to_string(content.size()) + " expected=" + std::to_string(expected_size) + " path=" + path);
         return true;
     }
     void clearWeaponCache() {
@@ -2586,47 +2559,17 @@ struct RCConnection {
                 setError("Failed to recv packet data");
                 break;
             }
-            {
-                char buf[64];
-                snprintf(buf, sizeof(buf), "recvLoop: raw packet len=%u", (unsigned)packet_length);
-                writeNativeTrace(buf);
-            }
             std::vector<uint8_t> decrypted = protocol.decryptPacket(packet_data.data(), packet_data.size());
-            {
-                char buf[64];
-                snprintf(buf, sizeof(buf), "recvLoop: decrypted len=%u", (unsigned)decrypted.size());
-                writeNativeTrace(buf);
-            }
             if (!validateHeap("before framing loop")) {
-                writeNativeTrace("HEAP CORRUPTION before framing loop!");
                 break;
             }
-            {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "recvLoop: first bytes: %u,%u,%u,%u len=%zu\n",
-                    decrypted.size() > 0 ? (unsigned)decrypted[0] : 0,
-                    decrypted.size() > 1 ? (unsigned)decrypted[1] : 0,
-                    decrypted.size() > 2 ? (unsigned)decrypted[2] : 0,
-                    decrypted.size() > 3 ? (unsigned)decrypted[3] : 0,
-                    decrypted.size());
-                writeNativeTrace(buf);
-            }
             if (decrypted.size() > 2 && decrypted[0] == 'B' && decrypted[1] == 'Z') {
-                writeNativeTrace("recvLoop: bzip2 decompressing");
                 std::vector<uint8_t> bz_decompressed = grc::bzip2Decompress(decrypted.data(), decrypted.size());
-                {
-                    char buf2[128];
-                    snprintf(buf2, sizeof(buf2), "recvLoop: bzip2 result len=%zu", bz_decompressed.size());
-                    writeNativeTrace(buf2);
-                }
                 if (!bz_decompressed.empty()) decrypted = bz_decompressed;
             }
             size_t offset = 0;
             while (offset < decrypted.size()) {
                 if (offset >= decrypted.capacity()) {
-                    char buf[128];
-                    snprintf(buf, sizeof(buf), "CORRUPTION: offset=%zu >= capacity=%zu size=%zu\n", offset, decrypted.capacity(), decrypted.size());
-                    writeNativeTrace(buf);
                     break;
                 }
                 if (decrypted[offset] == 132) {
@@ -2635,13 +2578,7 @@ struct RCConnection {
                         if (offset + 5 + raw_length <= decrypted.size()) {
                             std::vector<uint8_t> raw_packet(decrypted.begin() + offset + 5, decrypted.begin() + offset + 5 + raw_length);
                             if (!raw_packet.empty() && raw_packet.back() == 0x0A) raw_packet.pop_back();
-                            {
-                                char buf[128];
-                                snprintf(buf, sizeof(buf), "recvLoop: raw-block offset=%zu len=%d first=%u", offset, raw_length, !raw_packet.empty() ? (unsigned)raw_packet[0] : 0);
-                                writeNativeTrace(buf);
-                            }
                             if (!raw_packet.empty() && raw_packet[0] >= 32) processPacket(raw_packet);
-                            writeNativeTrace("recvLoop: raw-block done");
                             offset += 5 + raw_length;
                             continue;
                         }
@@ -2652,13 +2589,8 @@ struct RCConnection {
                 while (term_pos < decrypted.size() && decrypted[term_pos] != 0x0A) term_pos++;
                 if (term_pos >= decrypted.size()) break;
                 {
-                    size_t pkt_len = term_pos - offset;
                     std::vector<uint8_t> single_packet(decrypted.begin() + offset, decrypted.begin() + term_pos);
-                    char buf[128];
-                    snprintf(buf, sizeof(buf), "recvLoop: sub-packet offset=%zu len=%zu first=%u", offset, pkt_len, pkt_len > 0 ? (unsigned)single_packet[0] : 0);
-                    writeNativeTrace(buf);
                     processPacket(single_packet);
-                    writeNativeTrace("recvLoop: sub-packet done");
                 }
                 offset = term_pos + 1;
             }
@@ -3202,12 +3134,9 @@ int rc_copy_filebrowser_files(RCHandle handle, RCFileBrowserEntry** entries_out)
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
     int count = static_cast<int>(conn->filebrowser_files.size());
     if (count <= 0) return 0;
-    size_t alloc_size = (size_t)count * sizeof(RCFileBrowserEntry);
-    writeNativeTrace("copy_files: calloc " + std::to_string(count) + " entries (" + std::to_string(alloc_size) + " bytes)");
     validateHeap("before copy_files calloc");
     RCFileBrowserEntry* entries = static_cast<RCFileBrowserEntry*>(calloc(count, sizeof(RCFileBrowserEntry)));
-    if (!entries) { writeNativeTrace("copy_files: calloc FAILED"); return 0; }
-    writeNativeTrace("copy_files: calloc returned " + std::to_string((size_t)entries));
+    if (!entries) return 0;
     for (int i = 0; i < count; ++i) {
         entries[i].path = grcStrdup(conn->filebrowser_files[i].path.c_str());
         entries[i].rights = grcStrdup(conn->filebrowser_files[i].rights.c_str());
@@ -3217,7 +3146,6 @@ int rc_copy_filebrowser_files(RCHandle handle, RCFileBrowserEntry** entries_out)
     }
     *entries_out = entries;
     validateHeap("after copy_files strdup loop");
-    writeNativeTrace("copy_files: done, " + std::to_string(count) + " entries copied");
     return count;
 }
 void rc_free_filebrowser_folders(RCFileBrowserFolder* folders, int count) {
@@ -3231,13 +3159,11 @@ void rc_free_filebrowser_folders(RCFileBrowserFolder* folders, int count) {
 void rc_free_filebrowser_files(RCFileBrowserEntry* entries, int count) {
     if (!entries) return;
     validateHeap("before free_files");
-    writeNativeTrace("free_files: freeing " + std::to_string(count) + " entries at " + std::to_string((size_t)entries));
     for (int i = 0; i < count; ++i) {
         if (entries[i].path) free(entries[i].path);
         if (entries[i].rights) free(entries[i].rights);
     }
     free(entries);
-    writeNativeTrace("free_files: done");
 }
 char* rc_get_server_options(RCHandle handle) {
     if (!handle) return nullptr;
@@ -3791,7 +3717,6 @@ int rc_filebrowser_download(RCHandle handle, const char* file_path) {
     if (!handle || !file_path) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
-    writeNativeTrace("rc_filebrowser_download: " + std::string(file_path));
     {
         std::lock_guard<std::mutex> lock(conn->transfer_mutex);
         conn->file_transfers.clear();
@@ -3800,7 +3725,6 @@ int rc_filebrowser_download(RCHandle handle, const char* file_path) {
     std::vector<uint8_t> data(file_path, file_path + strlen(file_path));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_DOWN, data);
     int result = grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
-    writeNativeTrace("rc_filebrowser_download: sent, result=" + std::to_string(result));
     return result;
 }
 int rc_filebrowser_delete(RCHandle handle, const char* file_path) {
@@ -4622,25 +4546,16 @@ void rc_process_events(RCHandle handle) {
         std::lock_guard<std::mutex> lock(conn->event_mutex);
         events.swap(conn->event_queue);
     }
-    size_t event_count = events.size();
-    if (event_count > 0) writeNativeTrace("process_events: processing " + std::to_string(event_count) + " events");
     while (!events.empty()) {
-        const std::string label = events.front().first;
-        writeNativeTrace("before " + label);
         try {
             events.front().second();
-            writeNativeTrace("after " + label);
             void* probe = malloc(16);
             if (probe) free(probe);
-            else writeNativeTrace("HEAP_PROBE_FAIL after " + label);
         } catch (const std::exception& e) {
             conn->setError(std::string("Event callback error: ") + e.what());
-            writeNativeTrace("exception " + label + ": " + e.what());
         } catch (...) {
             conn->setError("Event callback error: unknown exception");
-            writeNativeTrace("exception " + label + ": unknown");
         }
         events.pop();
-        writeNativeTrace("popped " + label + ", queue remaining=" + std::to_string(events.size()));
     }
 }
