@@ -35,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grclib-windows-${{ matrix.arch }}
-          path: build/Release/grclib.dll
+          path: bin/grclib.dll
           if-no-files-found: error
 
   linux:
@@ -77,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grclib-linux-${{ matrix.arch }}
-          path: build/grclib.so
+          path: bin/grclib.so
           if-no-files-found: error
 
   macos:
@@ -110,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grclib-macos-${{ matrix.arch }}
-          path: build/grclib.dylib
+          path: bin/grclib.dylib
           if-no-files-found: error
 
   release:
