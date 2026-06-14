@@ -100,6 +100,7 @@ GRCLIB_API int rc_connect_to_nc_server(RCHandle handle);
 GRCLIB_API int rc_is_connected(RCHandle handle);
 GRCLIB_API int rc_is_authenticated(RCHandle handle);
 GRCLIB_API int rc_is_nc_connected(RCHandle handle);
+GRCLIB_API int rc_is_nc_authenticated(RCHandle handle);
 GRCLIB_API void rc_on_connected(RCHandle handle, RC_OnConnected callback, void* user_data);
 GRCLIB_API void rc_on_disconnected(RCHandle handle, RC_OnDisconnected callback, void* user_data);
 GRCLIB_API void rc_on_player_joined(RCHandle handle, RC_OnPlayerJoined callback, void* user_data);
