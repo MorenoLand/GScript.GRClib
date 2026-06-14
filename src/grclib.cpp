@@ -128,6 +128,241 @@ static std::string readAttrString(const std::vector<uint8_t>& data, size_t& offs
     return value;
 }
 
+static bool isPlayerAttrStringProp(int prop_id) {
+    return prop_id == 0 || prop_id == 10 || prop_id == 12 || prop_id == 20 ||
+        prop_id == 21 || prop_id == 34 || prop_id == 35 || prop_id == 52 ||
+        prop_id == 53 || prop_id == 75 || prop_id == 82 ||
+        (prop_id >= 37 && prop_id <= 41) ||
+        (prop_id >= 46 && prop_id <= 49) ||
+        (prop_id >= 54 && prop_id <= 74);
+}
+
+static int playerAttrIndex(int prop_id) {
+    if (prop_id >= 37 && prop_id <= 41) return prop_id - 36;
+    if (prop_id >= 46 && prop_id <= 49) return prop_id - 40;
+    if (prop_id >= 54 && prop_id <= 74) return prop_id - 44;
+    return 0;
+}
+
+static std::string playerPropName(int prop_id) {
+    int attr = playerAttrIndex(prop_id);
+    if (attr) return "attr" + std::to_string(attr);
+    switch (prop_id) {
+        case 0: return "nick";
+        case 1: return "max_power";
+        case 2: return "current_power";
+        case 3: return "rupees";
+        case 4: return "arrows";
+        case 5: return "bombs";
+        case 6: return "glove_power";
+        case 7: return "bomb_power";
+        case 8: return "sword";
+        case 9: return "shield";
+        case 10: return "gani";
+        case 11: return "head_image";
+        case 12: return "chat";
+        case 13: return "colors";
+        case 14: return "id";
+        case 15: return "x";
+        case 16: return "y";
+        case 17: return "direction";
+        case 18: return "status";
+        case 19: return "carry_sprite";
+        case 20: return "level";
+        case 21: return "horse_image";
+        case 22: return "horse_bushes";
+        case 23: return "effect_colors";
+        case 24: return "carry_npc";
+        case 25: return "ap_counter";
+        case 26: return "magic_points";
+        case 27: return "kills";
+        case 28: return "deaths";
+        case 29: return "online_seconds";
+        case 30: return "ip_address";
+        case 31: return "udp_port";
+        case 32: return "alignment";
+        case 33: return "additional_flags";
+        case 34: return "account";
+        case 35: return "body_image";
+        case 36: return "rating";
+        case 42: return "attached_npc";
+        case 43: return "gmap_level_x";
+        case 44: return "gmap_level_y";
+        case 45: return "z";
+        case 50: return "join_leave_level";
+        case 51: return "connected";
+        case 52: return "language";
+        case 53: return "status_message";
+        case 75: return "os_type";
+        case 76: return "text_codepage";
+        case 77: return "unknown77";
+        case 78: return "precise_x";
+        case 79: return "precise_y";
+        case 80: return "precise_z";
+        case 81: return "unknown81";
+        case 82: return "community";
+        default: return std::to_string(prop_id);
+    }
+}
+
+static int decodeAttrGShort(const std::vector<uint8_t>& data, size_t offset) {
+    if (offset + 1 >= data.size()) return 0;
+    return (decodeAttrByte(data[offset]) << 7) + decodeAttrByte(data[offset + 1]);
+}
+
+static int decodeAttrGInt3(const std::vector<uint8_t>& data, size_t offset) {
+    if (offset + 2 >= data.size()) return 0;
+    return (decodeAttrByte(data[offset]) << 14) + (decodeAttrByte(data[offset + 1]) << 7) + decodeAttrByte(data[offset + 2]);
+}
+
+static double decodeAttrSigned14(const std::vector<uint8_t>& data, size_t offset) {
+    int raw = decodeAttrGShort(data, offset);
+    int value = raw >> 1;
+    return ((raw & 1) ? -value : value) / 16.0;
+}
+
+struct PlayerPropValue {
+    int id;
+    std::string name;
+    std::string value;
+};
+
+static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offset, int prop_id, PlayerPropValue& out) {
+    out.id = prop_id;
+    out.name = playerPropName(prop_id);
+    out.value.clear();
+
+    if (isPlayerAttrStringProp(prop_id)) {
+        out.value = readAttrString(packet, offset);
+        return true;
+    }
+    if (prop_id == 1 || prop_id == 4 || prop_id == 5 || prop_id == 6 ||
+        prop_id == 7 || prop_id == 17 || prop_id == 18 || prop_id == 19 ||
+        prop_id == 22 || prop_id == 26 || prop_id == 32 || prop_id == 33 ||
+        prop_id == 43 || prop_id == 44 || prop_id == 50 || prop_id == 51 ||
+        prop_id == 77 || prop_id == 81) {
+        if (offset >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrByte(packet[offset++]));
+        return true;
+    }
+    if (prop_id == 2 || prop_id == 15 || prop_id == 16) {
+        if (offset >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrByte(packet[offset++]) / 2.0);
+        return true;
+    }
+    if (prop_id == 3 || prop_id == 24 || prop_id == 27 || prop_id == 28 ||
+        prop_id == 29 || prop_id == 31 || prop_id == 76) {
+        if (offset + 2 >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrGInt3(packet, offset));
+        offset += 3;
+        return true;
+    }
+    if (prop_id == 8 || prop_id == 9) {
+        if (offset >= packet.size()) return false;
+        int raw = decodeAttrByte(packet[offset++]);
+        std::string image;
+        if (raw >= 10 && offset < packet.size()) image = readAttrString(packet, offset);
+        out.value = image.empty() ? std::to_string(raw) : (std::to_string(raw) + ":" + image);
+        return true;
+    }
+    if (prop_id == 11) {
+        if (offset >= packet.size()) return false;
+        int head_len = decodeAttrByte(packet[offset++]);
+        if (head_len > 0 && head_len < 100) {
+            out.value = "head" + std::to_string(head_len) + ".gif";
+            return true;
+        }
+        if (head_len >= 100 && offset + (size_t)(head_len - 100) <= packet.size()) {
+            out.value.assign(packet.begin() + offset, packet.begin() + offset + (head_len - 100));
+            offset += head_len - 100;
+            return true;
+        }
+        out.value = "head0.gif";
+        return true;
+    }
+    if (prop_id == 13) {
+        if (offset + 4 >= packet.size()) return false;
+        std::ostringstream colors;
+        for (int i = 0; i < 5; ++i) {
+            if (i) colors << ",";
+            colors << decodeAttrByte(packet[offset + i]);
+        }
+        offset += 5;
+        out.value = colors.str();
+        return true;
+    }
+    if (prop_id == 14) {
+        if (offset + 1 >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrGShort(packet, offset));
+        offset += 2;
+        return true;
+    }
+    if (prop_id == 23) {
+        if (offset >= packet.size()) return false;
+        int enabled = decodeAttrByte(packet[offset]);
+        size_t count = enabled > 0 ? 4 : 1;
+        if (offset + count > packet.size()) return false;
+        std::ostringstream effect;
+        for (size_t i = 0; i < count; ++i) {
+            if (i) effect << ",";
+            effect << decodeAttrByte(packet[offset + i]);
+        }
+        offset += count;
+        out.value = effect.str();
+        return true;
+    }
+    if (prop_id == 25) {
+        if (offset + 1 >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrGShort(packet, offset));
+        offset += 2;
+        return true;
+    }
+    if (prop_id == 30) {
+        if (offset + 4 >= packet.size()) return false;
+        int b0 = decodeAttrByte(packet[offset]) & 0xff;
+        int b1 = decodeAttrByte(packet[offset + 1]) & 0xff;
+        int b2 = decodeAttrByte(packet[offset + 2]) & 0xff;
+        int b3 = decodeAttrByte(packet[offset + 3]) & 0xff;
+        int b4 = decodeAttrByte(packet[offset + 4]) & 0xff;
+        int ip_value = (b0 << 28) | (b1 << 21) | (b2 << 14) | (b3 << 7) | b4;
+        out.value = std::to_string((ip_value >> 24) & 0xff) + "." +
+            std::to_string((ip_value >> 16) & 0xff) + "." +
+            std::to_string((ip_value >> 8) & 0xff) + "." +
+            std::to_string(ip_value & 0xff);
+        offset += 5;
+        return true;
+    }
+    if (prop_id == 36) {
+        if (offset + 2 >= packet.size()) return false;
+        int high = decodeAttrByte(packet[offset]);
+        int low = decodeAttrByte(packet[offset + 1]);
+        int frac = decodeAttrByte(packet[offset + 2]);
+        out.value = std::to_string((high << 5) + (low >> 2)) + ":" + std::to_string(((low & 0x03) << 7) + frac);
+        offset += 3;
+        return true;
+    }
+    if (prop_id == 42) {
+        if (offset + 3 >= packet.size()) return false;
+        int kind = decodeAttrByte(packet[offset++]);
+        int id = decodeAttrGInt3(packet, offset);
+        offset += 3;
+        out.value = std::to_string(kind) + ":" + std::to_string(id);
+        return true;
+    }
+    if (prop_id == 45) {
+        if (offset >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrByte(packet[offset++]) - 50);
+        return true;
+    }
+    if (prop_id == 78 || prop_id == 79 || prop_id == 80) {
+        if (offset + 1 >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrSigned14(packet, offset));
+        offset += 2;
+        return true;
+    }
+    return false;
+}
+
 static std::string jsonEscape(const std::string& value) {
     std::string out;
     for (unsigned char c : value) {
@@ -497,6 +732,7 @@ static const char* incomingRcPacketName(int packet_id) {
 struct RCConnection {
     std::string listserver_host;
     int listserver_port;
+    std::string game_host;
     std::string account;
     std::string password;
     std::vector<grc::ServerInfo> servers;
@@ -664,6 +900,30 @@ struct RCConnection {
             if (item.rights) free((void*)item.rights);
         }
         filebrowser_file_view.clear();
+    }
+    void updateCachedPlayerProp(int player_id, const PlayerPropValue& prop) {
+        if (prop.name != "account" && prop.name != "nick" && prop.name != "level") return;
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        for (auto& player : player_cache) {
+            if (player.id != player_id) continue;
+            if (prop.name == "account") {
+                if (player.account) free(player.account);
+                player.account = grcStrdup(prop.value.c_str());
+            } else if (prop.name == "nick") {
+                if (player.nick) free(player.nick);
+                player.nick = grcStrdup(prop.value.c_str());
+            } else if (prop.name == "level") {
+                if (player.level) free(player.level);
+                player.level = prop.value.empty() ? nullptr : grcStrdup(prop.value.c_str());
+            }
+            return;
+        }
+    }
+    void emitPlayerPropChanged(int player_id, const PlayerPropValue& prop) {
+        if (!on_player_prop_changed) return;
+        pushEvent([this, player_id, name = prop.name, value = prop.value]() {
+            on_player_prop_changed(player_id, name.c_str(), value.c_str(), on_player_prop_changed_data);
+        });
     }
     void processPacket(const std::vector<uint8_t>& packet) {
         if (packet.empty()) return;
@@ -892,29 +1152,12 @@ struct RCConnection {
                 if (offset + 2 <= packet.size()) {
                     int player_id = grc::decodeGShort(packet.data() + offset);
                     offset += 2;
-                    if (offset < packet.size()) {
+                    while (offset < packet.size()) {
                         int prop_id = grc::decodeGByte(packet[offset++]);
-                        if (prop_id == 0 && offset < packet.size()) { // Nickname
-                            int nick_len = grc::decodeGByte(packet[offset++]);
-                            if (offset + nick_len <= packet.size()) {
-                                std::string nickname(packet.begin() + offset, packet.begin() + offset + nick_len);
-                                {
-                                    std::lock_guard<std::mutex> lock(cache_mutex);
-                                    for (auto& player : player_cache) {
-                                        if (player.id == player_id) {
-                                            if (player.nick) free(player.nick);
-                                            player.nick = grcStrdup(nickname.c_str());
-                                            break;
-                                        }
-                                    }
-                                }
-                                if (on_player_prop_changed) {
-                                    pushEvent([this, player_id, nickname]() {
-                                        on_player_prop_changed(player_id, "nick", nickname.c_str(), on_player_prop_changed_data);
-                                    });
-                                }
-                            }
-                        }
+                        PlayerPropValue prop;
+                        if (!readPlayerPropValue(packet, offset, prop_id, prop)) break;
+                        updateCachedPlayerProp(player_id, prop);
+                        emitPlayerPropChanged(player_id, prop);
                     }
                 }
                 break;
@@ -967,7 +1210,7 @@ struct RCConnection {
                                 jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrByte(packet[parse_offset++]));
                             }
                         } else if (prop_id == 53) {
-                            jsonAddString(properties, first_property, "body_image", readAttrString(packet, parse_offset));
+                            jsonAddString(properties, first_property, "status_message", readAttrString(packet, parse_offset));
                         } else if (prop_id == 2 || prop_id == 15 || prop_id == 16) {
                             if (parse_offset < packet.size()) {
                                 jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrByte(packet[parse_offset++]) / 2.0);
@@ -1030,11 +1273,8 @@ struct RCConnection {
                             } else {
                                 parse_offset = packet.size();
                             }
-                        } else if (prop_id == 10 || prop_id == 12 || prop_id == 20 || prop_id == 21 ||
-                                   prop_id == 35 || prop_id == 52 || prop_id == 75 || prop_id == 82 ||
-                                   (prop_id >= 37 && prop_id <= 41) || (prop_id >= 46 && prop_id <= 49) ||
-                                   (prop_id >= 54 && prop_id <= 74)) {
-                            jsonAddString(properties, first_property, std::to_string(prop_id), readAttrString(packet, parse_offset));
+                        } else if (isPlayerAttrStringProp(prop_id)) {
+                            jsonAddString(properties, first_property, playerPropName(prop_id), readAttrString(packet, parse_offset));
                         } else if (prop_id == 30) {
                             if (parse_offset + 4 < packet.size()) {
                                 int b0 = decodeAttrByte(packet[parse_offset]) & 0xff;
@@ -1065,7 +1305,14 @@ struct RCConnection {
                             }
                         } else if (prop_id == 45) {
                             if (parse_offset < packet.size()) {
-                                jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrByte(packet[parse_offset++]) - 50);
+                                jsonAddNumber(properties, first_property, playerPropName(prop_id), decodeAttrByte(packet[parse_offset++]) - 50);
+                            }
+                        } else if (prop_id == 78 || prop_id == 79 || prop_id == 80) {
+                            if (parse_offset + 1 < packet.size()) {
+                                jsonAddNumber(properties, first_property, playerPropName(prop_id), decodeAttrSigned14(packet, parse_offset));
+                                parse_offset += 2;
+                            } else {
+                                parse_offset = packet.size();
                             }
                         } else if (prop_id == 23) {
                             if (parse_offset < packet.size()) {
@@ -1224,51 +1471,45 @@ struct RCConnection {
                                 std::vector<uint8_t> query_packet = protocol.sendPacket(PLI_NPCSERVERQUERY, query_data);
                                 grc::sendAll(game_socket, query_packet.data(), query_packet.size());
                             }
-                            // Parse properties (nickname, level, admin, etc)
+                            // Parse the same player property stream used by live property updates.
                             std::string nickname, level;
-                            bool admin = false;
+                            std::string account_from_props;
+                            std::vector<PlayerPropValue> parsed_props;
                             while (offset < packet.size()) {
                                 int prop_id = grc::decodeGByte(packet[offset++]);
-                                if (prop_id == 0 && offset < packet.size()) { // Nickname
-                                    int nick_len = grc::decodeGByte(packet[offset++]);
-                                    if (offset + nick_len <= packet.size()) {
-                                        nickname = std::string(packet.begin() + offset, packet.begin() + offset + nick_len);
-                                        offset += nick_len;
+                                PlayerPropValue prop;
+                                if (!readPlayerPropValue(packet, offset, prop_id, prop)) break;
+                                if (prop.name == "nick") nickname = prop.value;
+                                else if (prop.name == "level") level = prop.value;
+                                else if (prop.name == "account") account_from_props = prop.value;
+                                parsed_props.push_back(prop);
+                            }
+                            if (!account_from_props.empty()) account = account_from_props;
+                            {
+                                std::lock_guard<std::mutex> lock(cache_mutex);
+                                bool found = false;
+                                for (auto& p : player_cache) {
+                                    if (p.id == player_id) {
+                                        if (p.account) free(p.account);
+                                        if (p.nick) free(p.nick);
+                                        if (p.level) free(p.level);
+                                        p.account = grcStrdup(account.c_str());
+                                        p.nick = grcStrdup(nickname.c_str());
+                                        p.level = level.empty() ? nullptr : grcStrdup(level.c_str());
+                                        found = true;
+                                        break;
                                     }
-                                } else if (prop_id == 20 && offset < packet.size()) { // Level
-                                    int level_len = grc::decodeGByte(packet[offset++]);
-                                    if (offset + level_len <= packet.size()) {
-                                        level = std::string(packet.begin() + offset, packet.begin() + offset + level_len);
-                                        offset += level_len;
-                                    }
-                                } else if (prop_id == 1 && offset < packet.size()) { // Admin
-                                    admin = (grc::decodeGByte(packet[offset++]) > 0);
-                                } else {
-                                    break; // Unknown property, stop parsing
+                                }
+                                if (!found) {
+                                    RCPlayer player;
+                                    player.account = grcStrdup(account.c_str());
+                                    player.id = player_id;
+                                    player.nick = grcStrdup(nickname.c_str());
+                                    player.level = level.empty() ? nullptr : grcStrdup(level.c_str());
+                                    player_cache.push_back(player);
                                 }
                             }
-                            std::lock_guard<std::mutex> lock(cache_mutex);
-                            bool found = false;
-                            for (auto& p : player_cache) {
-                                if (p.id == player_id) {
-                                    if (p.account) free(p.account);
-                                    if (p.nick) free(p.nick);
-                                    if (p.level) free(p.level);
-                                    p.account = grcStrdup(account.c_str());
-                                    p.nick = grcStrdup(nickname.c_str());
-                                    p.level = level.empty() ? nullptr : grcStrdup(level.c_str());
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if (!found) {
-                                RCPlayer player;
-                                player.account = grcStrdup(account.c_str());
-                                player.id = player_id;
-                                player.nick = grcStrdup(nickname.c_str());
-                                player.level = level.empty() ? nullptr : grcStrdup(level.c_str());
-                                player_cache.push_back(player);
-                            }
+                            for (const auto& prop : parsed_props) emitPlayerPropChanged(player_id, prop);
                             if (on_player_joined) {
                                 pushEvent([this, account, player_id]() {
                                     on_player_joined(account.c_str(), player_id, on_player_joined_data);
@@ -1288,6 +1529,7 @@ struct RCConnection {
                         if (it->id == player_id) {
                             if (it->account) free(it->account);
                             if (it->nick) free(it->nick);
+                            if (it->level) free(it->level);
                             player_cache.erase(it);
                             break;
                         }
@@ -2224,14 +2466,11 @@ struct RCConnection {
             return;
         }
 
-        // Handle NC authentication packets (11 or 25)
-        if (packet_id == 11 || packet_id == 25) {
+        if (!nc_authenticated && packet_id != 16) {
             nc_authenticated = true;
-            if (packet_id == 25) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                std::vector<uint8_t> weapon_request = nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
-                grc::sendAll(nc_socket, weapon_request.data(), weapon_request.size());
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            std::vector<uint8_t> weapon_request = nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
+            grc::sendAll(nc_socket, weapon_request.data(), weapon_request.size());
         }
 
         if (packet_id == PLO_RC_CHAT) {
@@ -2690,6 +2929,7 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
     if (conn->recv_thread.joinable()) conn->recv_thread.join();
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
     const auto& server = conn->servers[server_index];
+    conn->game_host = server.ip;
     conn->game_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->game_socket == INVALID_SOCKET) {
         conn->setError("Failed to create socket");
@@ -2742,6 +2982,10 @@ int rc_is_nc_connected(RCHandle handle) {
     if (!handle) return 0;
     return ((RCConnection*)handle)->nc_connected ? 1 : 0;
 }
+int rc_is_nc_authenticated(RCHandle handle) {
+    if (!handle) return 0;
+    return ((RCConnection*)handle)->nc_authenticated ? 1 : 0;
+}
 int rc_connect_to_nc_server(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
@@ -2764,6 +3008,9 @@ int rc_connect_to_nc_server(RCHandle handle) {
     }
     std::string nc_host = conn->npc_server_address.substr(0, comma_pos);
     int nc_port = std::atoi(conn->npc_server_address.substr(comma_pos + 1).c_str());
+    if ((nc_host == "127.0.0.1" || nc_host == "localhost" || nc_host == "0.0.0.0") && !conn->game_host.empty()) {
+        nc_host = conn->game_host;
+    }
     conn->nc_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->nc_socket == INVALID_SOCKET) {
         conn->setError("Failed to create NC socket");
