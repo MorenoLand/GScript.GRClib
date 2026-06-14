@@ -129,18 +129,19 @@ static std::string readAttrString(const std::vector<uint8_t>& data, size_t& offs
 }
 
 static bool isPlayerAttrStringProp(int prop_id) {
-    return prop_id == 0 || prop_id == 10 || prop_id == 12 || prop_id == 20 ||
-        prop_id == 21 || prop_id == 34 || prop_id == 35 || prop_id == 52 ||
-        prop_id == 53 || prop_id == 75 || prop_id == 82 ||
-        (prop_id >= 37 && prop_id <= 41) ||
-        (prop_id >= 46 && prop_id <= 49) ||
-        (prop_id >= 54 && prop_id <= 74);
+    return prop_id == RC_PLPROP_NICKNAME || prop_id == RC_PLPROP_GANI || prop_id == RC_PLPROP_CURCHAT ||
+        prop_id == RC_PLPROP_CURLEVEL || prop_id == RC_PLPROP_HORSEGIF || prop_id == RC_PLPROP_ACCOUNTNAME ||
+        prop_id == RC_PLPROP_BODYIMAGE || prop_id == RC_PLPROP_PLANGUAGE || prop_id == RC_PLPROP_PSTATUSMSG ||
+        prop_id == RC_PLPROP_OSTYPE || prop_id == RC_PLPROP_COMMUNITYNAME ||
+        (prop_id >= RC_PLPROP_GATTRIB1 && prop_id <= RC_PLPROP_GATTRIB5) ||
+        (prop_id >= RC_PLPROP_GATTRIB6 && prop_id <= RC_PLPROP_GATTRIB9) ||
+        (prop_id >= RC_PLPROP_GATTRIB10 && prop_id <= RC_PLPROP_GATTRIB30);
 }
 
 static int playerAttrIndex(int prop_id) {
-    if (prop_id >= 37 && prop_id <= 41) return prop_id - 36;
-    if (prop_id >= 46 && prop_id <= 49) return prop_id - 40;
-    if (prop_id >= 54 && prop_id <= 74) return prop_id - 44;
+    if (prop_id >= RC_PLPROP_GATTRIB1 && prop_id <= RC_PLPROP_GATTRIB5) return prop_id - RC_PLPROP_GATTRIB1 + 1;
+    if (prop_id >= RC_PLPROP_GATTRIB6 && prop_id <= RC_PLPROP_GATTRIB9) return prop_id - RC_PLPROP_GATTRIB6 + 6;
+    if (prop_id >= RC_PLPROP_GATTRIB10 && prop_id <= RC_PLPROP_GATTRIB30) return prop_id - RC_PLPROP_GATTRIB10 + 10;
     return 0;
 }
 
@@ -148,59 +149,59 @@ static std::string playerPropName(int prop_id) {
     int attr = playerAttrIndex(prop_id);
     if (attr) return "attr" + std::to_string(attr);
     switch (prop_id) {
-        case 0: return "nick";
-        case 1: return "max_power";
-        case 2: return "current_power";
-        case 3: return "rupees";
-        case 4: return "arrows";
-        case 5: return "bombs";
-        case 6: return "glove_power";
-        case 7: return "bomb_power";
-        case 8: return "sword";
-        case 9: return "shield";
-        case 10: return "gani";
-        case 11: return "head_image";
-        case 12: return "chat";
-        case 13: return "colors";
-        case 14: return "id";
-        case 15: return "x";
-        case 16: return "y";
-        case 17: return "direction";
-        case 18: return "status";
-        case 19: return "carry_sprite";
-        case 20: return "level";
-        case 21: return "horse_image";
-        case 22: return "horse_bushes";
-        case 23: return "effect_colors";
-        case 24: return "carry_npc";
-        case 25: return "ap_counter";
-        case 26: return "magic_points";
-        case 27: return "kills";
-        case 28: return "deaths";
-        case 29: return "online_seconds";
-        case 30: return "ip_address";
-        case 31: return "udp_port";
-        case 32: return "alignment";
-        case 33: return "additional_flags";
-        case 34: return "account";
-        case 35: return "body_image";
-        case 36: return "rating";
-        case 42: return "attached_npc";
-        case 43: return "gmap_level_x";
-        case 44: return "gmap_level_y";
-        case 45: return "z";
-        case 50: return "join_leave_level";
-        case 51: return "connected";
-        case 52: return "language";
-        case 53: return "status_message";
-        case 75: return "os_type";
-        case 76: return "text_codepage";
-        case 77: return "unknown77";
-        case 78: return "precise_x";
-        case 79: return "precise_y";
-        case 80: return "precise_z";
-        case 81: return "unknown81";
-        case 82: return "community";
+        case RC_PLPROP_NICKNAME: return "nick";
+        case RC_PLPROP_MAXPOWER: return "max_power";
+        case RC_PLPROP_CURPOWER: return "current_power";
+        case RC_PLPROP_RUPEESCOUNT: return "rupees";
+        case RC_PLPROP_ARROWSCOUNT: return "arrows";
+        case RC_PLPROP_BOMBSCOUNT: return "bombs";
+        case RC_PLPROP_GLOVEPOWER: return "glove_power";
+        case RC_PLPROP_BOMBPOWER: return "bomb_power";
+        case RC_PLPROP_SWORDPOWER: return "sword";
+        case RC_PLPROP_SHIELDPOWER: return "shield";
+        case RC_PLPROP_GANI: return "gani";
+        case RC_PLPROP_HEADIMAGE: return "head_image";
+        case RC_PLPROP_CURCHAT: return "chat";
+        case RC_PLPROP_COLORS: return "colors";
+        case RC_PLPROP_ID: return "id";
+        case RC_PLPROP_X: return "x";
+        case RC_PLPROP_Y: return "y";
+        case RC_PLPROP_DIRECTION: return "direction";
+        case RC_PLPROP_STATUS: return "status";
+        case RC_PLPROP_CARRYSPRITE: return "carry_sprite";
+        case RC_PLPROP_CURLEVEL: return "level";
+        case RC_PLPROP_HORSEGIF: return "horse_image";
+        case RC_PLPROP_HORSEBUSHES: return "horse_bushes";
+        case RC_PLPROP_EFFECTCOLORS: return "effect_colors";
+        case RC_PLPROP_CARRYNPC: return "carry_npc";
+        case RC_PLPROP_APCOUNTER: return "ap_counter";
+        case RC_PLPROP_MAGICPOINTS: return "magic_points";
+        case RC_PLPROP_KILLSCOUNT: return "kills";
+        case RC_PLPROP_DEATHSCOUNT: return "deaths";
+        case RC_PLPROP_ONLINESECS: return "online_seconds";
+        case RC_PLPROP_IPADDR: return "ip_address";
+        case RC_PLPROP_UDPPORT: return "udp_port";
+        case RC_PLPROP_ALIGNMENT: return "alignment";
+        case RC_PLPROP_ADDITFLAGS: return "additional_flags";
+        case RC_PLPROP_ACCOUNTNAME: return "account";
+        case RC_PLPROP_BODYIMAGE: return "body_image";
+        case RC_PLPROP_RATING: return "rating";
+        case RC_PLPROP_ATTACHNPC: return "attached_npc";
+        case RC_PLPROP_GMAPLEVELX: return "gmap_level_x";
+        case RC_PLPROP_GMAPLEVELY: return "gmap_level_y";
+        case RC_PLPROP_Z: return "z";
+        case RC_PLPROP_JOINLEAVELVL: return "join_leave_level";
+        case RC_PLPROP_PCONNECTED: return "connected";
+        case RC_PLPROP_PLANGUAGE: return "language";
+        case RC_PLPROP_PSTATUSMSG: return "status_message";
+        case RC_PLPROP_OSTYPE: return "os_type";
+        case RC_PLPROP_TEXTCODEPAGE: return "text_codepage";
+        case RC_PLPROP_UNKNOWN77: return "unknown77";
+        case RC_PLPROP_X2: return "precise_x";
+        case RC_PLPROP_Y2: return "precise_y";
+        case RC_PLPROP_Z2: return "precise_z";
+        case RC_PLPROP_UNKNOWN81: return "unknown81";
+        case RC_PLPROP_COMMUNITYNAME: return "community";
         default: return std::to_string(prop_id);
     }
 }
@@ -236,28 +237,34 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = readAttrString(packet, offset);
         return true;
     }
-    if (prop_id == 1 || prop_id == 4 || prop_id == 5 || prop_id == 6 ||
-        prop_id == 7 || prop_id == 17 || prop_id == 18 || prop_id == 19 ||
-        prop_id == 22 || prop_id == 26 || prop_id == 32 || prop_id == 33 ||
-        prop_id == 43 || prop_id == 44 || prop_id == 50 || prop_id == 51 ||
-        prop_id == 77 || prop_id == 81) {
+    if (prop_id == RC_PLPROP_MAXPOWER || prop_id == RC_PLPROP_ARROWSCOUNT ||
+        prop_id == RC_PLPROP_BOMBSCOUNT || prop_id == RC_PLPROP_GLOVEPOWER ||
+        prop_id == RC_PLPROP_BOMBPOWER || prop_id == RC_PLPROP_DIRECTION ||
+        prop_id == RC_PLPROP_STATUS || prop_id == RC_PLPROP_CARRYSPRITE ||
+        prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_MAGICPOINTS ||
+        prop_id == RC_PLPROP_ALIGNMENT || prop_id == RC_PLPROP_ADDITFLAGS ||
+        prop_id == RC_PLPROP_GMAPLEVELX || prop_id == RC_PLPROP_GMAPLEVELY ||
+        prop_id == RC_PLPROP_JOINLEAVELVL || prop_id == RC_PLPROP_PCONNECTED ||
+        prop_id == RC_PLPROP_UNKNOWN77 || prop_id == RC_PLPROP_UNKNOWN81) {
         if (offset >= packet.size()) return false;
         out.value = std::to_string(decodeAttrByte(packet[offset++]));
         return true;
     }
-    if (prop_id == 2 || prop_id == 15 || prop_id == 16) {
+    if (prop_id == RC_PLPROP_CURPOWER || prop_id == RC_PLPROP_X || prop_id == RC_PLPROP_Y) {
         if (offset >= packet.size()) return false;
         out.value = std::to_string(decodeAttrByte(packet[offset++]) / 2.0);
         return true;
     }
-    if (prop_id == 3 || prop_id == 24 || prop_id == 27 || prop_id == 28 ||
-        prop_id == 29 || prop_id == 31 || prop_id == 76) {
+    if (prop_id == RC_PLPROP_RUPEESCOUNT || prop_id == RC_PLPROP_CARRYNPC ||
+        prop_id == RC_PLPROP_KILLSCOUNT || prop_id == RC_PLPROP_DEATHSCOUNT ||
+        prop_id == RC_PLPROP_ONLINESECS || prop_id == RC_PLPROP_UDPPORT ||
+        prop_id == RC_PLPROP_TEXTCODEPAGE) {
         if (offset + 2 >= packet.size()) return false;
         out.value = std::to_string(decodeAttrGInt3(packet, offset));
         offset += 3;
         return true;
     }
-    if (prop_id == 8 || prop_id == 9) {
+    if (prop_id == RC_PLPROP_SWORDPOWER || prop_id == RC_PLPROP_SHIELDPOWER) {
         if (offset >= packet.size()) return false;
         int raw = decodeAttrByte(packet[offset++]);
         std::string image;
@@ -265,7 +272,7 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = image.empty() ? std::to_string(raw) : (std::to_string(raw) + ":" + image);
         return true;
     }
-    if (prop_id == 11) {
+    if (prop_id == RC_PLPROP_HEADIMAGE) {
         if (offset >= packet.size()) return false;
         int head_len = decodeAttrByte(packet[offset++]);
         if (head_len > 0 && head_len < 100) {
@@ -280,7 +287,7 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = "head0.gif";
         return true;
     }
-    if (prop_id == 13) {
+    if (prop_id == RC_PLPROP_COLORS) {
         if (offset + 4 >= packet.size()) return false;
         std::ostringstream colors;
         for (int i = 0; i < 5; ++i) {
@@ -291,13 +298,13 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = colors.str();
         return true;
     }
-    if (prop_id == 14) {
+    if (prop_id == RC_PLPROP_ID) {
         if (offset + 1 >= packet.size()) return false;
         out.value = std::to_string(decodeAttrGShort(packet, offset));
         offset += 2;
         return true;
     }
-    if (prop_id == 23) {
+    if (prop_id == RC_PLPROP_EFFECTCOLORS) {
         if (offset >= packet.size()) return false;
         int enabled = decodeAttrByte(packet[offset]);
         size_t count = enabled > 0 ? 4 : 1;
@@ -311,13 +318,13 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = effect.str();
         return true;
     }
-    if (prop_id == 25) {
+    if (prop_id == RC_PLPROP_APCOUNTER) {
         if (offset + 1 >= packet.size()) return false;
         out.value = std::to_string(decodeAttrGShort(packet, offset));
         offset += 2;
         return true;
     }
-    if (prop_id == 30) {
+    if (prop_id == RC_PLPROP_IPADDR) {
         if (offset + 4 >= packet.size()) return false;
         int b0 = decodeAttrByte(packet[offset]) & 0xff;
         int b1 = decodeAttrByte(packet[offset + 1]) & 0xff;
@@ -332,7 +339,7 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         offset += 5;
         return true;
     }
-    if (prop_id == 36) {
+    if (prop_id == RC_PLPROP_RATING) {
         if (offset + 2 >= packet.size()) return false;
         int high = decodeAttrByte(packet[offset]);
         int low = decodeAttrByte(packet[offset + 1]);
@@ -341,7 +348,7 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         offset += 3;
         return true;
     }
-    if (prop_id == 42) {
+    if (prop_id == RC_PLPROP_ATTACHNPC) {
         if (offset + 3 >= packet.size()) return false;
         int kind = decodeAttrByte(packet[offset++]);
         int id = decodeAttrGInt3(packet, offset);
@@ -349,12 +356,12 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         out.value = std::to_string(kind) + ":" + std::to_string(id);
         return true;
     }
-    if (prop_id == 45) {
+    if (prop_id == RC_PLPROP_Z) {
         if (offset >= packet.size()) return false;
         out.value = std::to_string(decodeAttrByte(packet[offset++]) - 50);
         return true;
     }
-    if (prop_id == 78 || prop_id == 79 || prop_id == 80) {
+    if (prop_id == RC_PLPROP_X2 || prop_id == RC_PLPROP_Y2 || prop_id == RC_PLPROP_Z2) {
         if (offset + 1 >= packet.size()) return false;
         out.value = std::to_string(decodeAttrSigned14(packet, offset));
         offset += 2;
@@ -1199,23 +1206,28 @@ struct RCConnection {
                     while (parse_offset < props_end && parse_offset < packet.size()) {
                         int prop_id = decodeAttrByte(packet[parse_offset++]);
 
-                        if (prop_id == 0) {
+                        if (prop_id == RC_PLPROP_NICKNAME) {
                             jsonAddString(properties, first_property, "nickname", readAttrString(packet, parse_offset));
-                        } else if (prop_id == 1 || prop_id == 4 || prop_id == 5 || prop_id == 6 ||
-                                   prop_id == 7 || prop_id == 17 || prop_id == 18 || prop_id == 19 ||
-                                   prop_id == 22 || prop_id == 26 || prop_id == 32 || prop_id == 33 ||
-                                   prop_id == 43 || prop_id == 44 || prop_id == 50 || prop_id == 51 ||
-                                   prop_id == 81) {
+                        } else if (prop_id == RC_PLPROP_MAXPOWER || prop_id == RC_PLPROP_ARROWSCOUNT ||
+                                   prop_id == RC_PLPROP_BOMBSCOUNT || prop_id == RC_PLPROP_GLOVEPOWER ||
+                                   prop_id == RC_PLPROP_BOMBPOWER || prop_id == RC_PLPROP_DIRECTION ||
+                                   prop_id == RC_PLPROP_STATUS || prop_id == RC_PLPROP_CARRYSPRITE ||
+                                   prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_MAGICPOINTS ||
+                                   prop_id == RC_PLPROP_ALIGNMENT || prop_id == RC_PLPROP_ADDITFLAGS ||
+                                   prop_id == RC_PLPROP_GMAPLEVELX || prop_id == RC_PLPROP_GMAPLEVELY ||
+                                   prop_id == RC_PLPROP_JOINLEAVELVL || prop_id == RC_PLPROP_PCONNECTED ||
+                                   prop_id == RC_PLPROP_UNKNOWN81) {
                             if (parse_offset < packet.size()) {
                                 jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrByte(packet[parse_offset++]));
                             }
-                        } else if (prop_id == 53) {
+                        } else if (prop_id == RC_PLPROP_PSTATUSMSG) {
                             jsonAddString(properties, first_property, "status_message", readAttrString(packet, parse_offset));
-                        } else if (prop_id == 2 || prop_id == 15 || prop_id == 16) {
+                        } else if (prop_id == RC_PLPROP_CURPOWER || prop_id == RC_PLPROP_X || prop_id == RC_PLPROP_Y) {
                             if (parse_offset < packet.size()) {
                                 jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrByte(packet[parse_offset++]) / 2.0);
                             }
-                        } else if (prop_id == 3 || prop_id == 27 || prop_id == 28 || prop_id == 29) {
+                        } else if (prop_id == RC_PLPROP_RUPEESCOUNT || prop_id == RC_PLPROP_KILLSCOUNT ||
+                                   prop_id == RC_PLPROP_DEATHSCOUNT || prop_id == RC_PLPROP_ONLINESECS) {
                             if (parse_offset + 2 < packet.size()) {
                                 int b0 = decodeAttrByte(packet[parse_offset]);
                                 int b1 = decodeAttrByte(packet[parse_offset + 1]);
@@ -1225,7 +1237,7 @@ struct RCConnection {
                             } else {
                                 parse_offset = packet.size();
                             }
-                        } else if (prop_id == 8) {
+                        } else if (prop_id == RC_PLPROP_SWORDPOWER) {
                             int power = (parse_offset < packet.size()) ? decodeAttrByte(packet[parse_offset++]) : 0;
                             if (power >= 10) {
                                 std::string image = readAttrString(packet, parse_offset);
@@ -1238,7 +1250,7 @@ struct RCConnection {
                                 jsonAddNumber(properties, first_property, "sword_power", 0);
                                 jsonAddString(properties, first_property, "sword_image", "");
                             }
-                        } else if (prop_id == 9) {
+                        } else if (prop_id == RC_PLPROP_SHIELDPOWER) {
                             int power = (parse_offset < packet.size()) ? decodeAttrByte(packet[parse_offset++]) : 0;
                             if (power >= 10) {
                                 std::string image = readAttrString(packet, parse_offset);
@@ -1251,7 +1263,7 @@ struct RCConnection {
                                 jsonAddNumber(properties, first_property, "shield_power", 0);
                                 jsonAddString(properties, first_property, "shield_image", "");
                             }
-                        } else if (prop_id == 11) {
+                        } else if (prop_id == RC_PLPROP_HEADIMAGE) {
                             if (parse_offset < packet.size()) {
                                 int head_len = decodeAttrByte(packet[parse_offset++]);
                                 if (head_len > 0 && head_len < 100) {
@@ -1264,7 +1276,7 @@ struct RCConnection {
                                     jsonAddString(properties, first_property, "head_image", "head0.gif");
                                 }
                             }
-                        } else if (prop_id == 13) {
+                        } else if (prop_id == RC_PLPROP_COLORS) {
                             if (parse_offset + 4 < packet.size()) {
                                 std::vector<int> colors;
                                 for (int i = 0; i < 5; ++i) colors.push_back(decodeAttrByte(packet[parse_offset + i]));
@@ -1275,7 +1287,7 @@ struct RCConnection {
                             }
                         } else if (isPlayerAttrStringProp(prop_id)) {
                             jsonAddString(properties, first_property, playerPropName(prop_id), readAttrString(packet, parse_offset));
-                        } else if (prop_id == 30) {
+                        } else if (prop_id == RC_PLPROP_IPADDR) {
                             if (parse_offset + 4 < packet.size()) {
                                 int b0 = decodeAttrByte(packet[parse_offset]) & 0xff;
                                 int b1 = decodeAttrByte(packet[parse_offset + 1]) & 0xff;
@@ -1292,7 +1304,7 @@ struct RCConnection {
                             } else {
                                 parse_offset = packet.size();
                             }
-                        } else if (prop_id == 36) {
+                        } else if (prop_id == RC_PLPROP_RATING) {
                             if (parse_offset + 2 < packet.size()) {
                                 int byte1 = decodeAttrByte(packet[parse_offset]);
                                 int byte2 = decodeAttrByte(packet[parse_offset + 1]);
@@ -1303,28 +1315,28 @@ struct RCConnection {
                             } else {
                                 parse_offset = packet.size();
                             }
-                        } else if (prop_id == 45) {
+                        } else if (prop_id == RC_PLPROP_Z) {
                             if (parse_offset < packet.size()) {
                                 jsonAddNumber(properties, first_property, playerPropName(prop_id), decodeAttrByte(packet[parse_offset++]) - 50);
                             }
-                        } else if (prop_id == 78 || prop_id == 79 || prop_id == 80) {
+                        } else if (prop_id == RC_PLPROP_X2 || prop_id == RC_PLPROP_Y2 || prop_id == RC_PLPROP_Z2) {
                             if (parse_offset + 1 < packet.size()) {
                                 jsonAddNumber(properties, first_property, playerPropName(prop_id), decodeAttrSigned14(packet, parse_offset));
                                 parse_offset += 2;
                             } else {
                                 parse_offset = packet.size();
                             }
-                        } else if (prop_id == 23) {
+                        } else if (prop_id == RC_PLPROP_EFFECTCOLORS) {
                             if (parse_offset < packet.size()) {
                                 parse_offset += decodeAttrByte(packet[parse_offset]) > 0 ? 4 : 1;
                             }
-                        } else if (prop_id == 24) {
+                        } else if (prop_id == RC_PLPROP_CARRYNPC) {
                             parse_offset += 3;
-                        } else if (prop_id == 25) {
+                        } else if (prop_id == RC_PLPROP_APCOUNTER) {
                             parse_offset += 2;
-                        } else if (prop_id == 31 || prop_id == 76) {
+                        } else if (prop_id == RC_PLPROP_UDPPORT || prop_id == RC_PLPROP_TEXTCODEPAGE) {
                             parse_offset += 3;
-                        } else if (prop_id == 42) {
+                        } else if (prop_id == RC_PLPROP_ATTACHNPC) {
                             parse_offset += 4;
                         } else if (parse_offset < packet.size()) {
                             parse_offset += 1;
@@ -2457,7 +2469,7 @@ struct RCConnection {
         size_t offset = 1;
 
         // Handle NC disconnect message
-        if (packet_id == 16) {
+        if (packet_id == PLO_DISCMESSAGE) {
             std::string disconnect_msg(packet.begin() + offset, packet.end());
             if (on_server_data) {
                 std::string msg = "[NC] DISCONNECT: " + disconnect_msg;
@@ -2466,7 +2478,7 @@ struct RCConnection {
             return;
         }
 
-        if (!nc_authenticated && packet_id != 16) {
+        if (!nc_authenticated && packet_id != PLO_DISCMESSAGE) {
             nc_authenticated = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             std::vector<uint8_t> weapon_request = nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
@@ -2636,22 +2648,21 @@ struct RCConnection {
                     int npc_id = grc::decodeGInt3(packet.data() + offset);
                     offset += 3;
                     std::string name, type, level;
-                    // Parse props: 50 = name, 51 = type, 52 = level
                     while (offset < packet.size()) {
                         int prop_id = grc::decodeGByte(packet[offset++]);
-                        if (prop_id == 50 && offset < packet.size()) {
+                        if (prop_id == RC_NPCPROP_NAME && offset < packet.size()) {
                             int name_len = grc::decodeGByte(packet[offset++]);
                             if (offset + name_len <= packet.size()) {
                                 name = std::string(packet.begin() + offset, packet.begin() + offset + name_len);
                                 offset += name_len;
                             }
-                        } else if (prop_id == 51 && offset < packet.size()) {
+                        } else if (prop_id == RC_NPCPROP_TYPE && offset < packet.size()) {
                             int type_len = grc::decodeGByte(packet[offset++]);
                             if (offset + type_len <= packet.size()) {
                                 type = std::string(packet.begin() + offset, packet.begin() + offset + type_len);
                                 offset += type_len;
                             }
-                        } else if (prop_id == 52 && offset < packet.size()) {
+                        } else if (prop_id == RC_NPCPROP_LEVEL && offset < packet.size()) {
                             int level_len = grc::decodeGByte(packet[offset++]);
                             if (offset + level_len <= packet.size()) {
                                 level = std::string(packet.begin() + offset, packet.begin() + offset + level_len);
@@ -4207,11 +4218,16 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     auto addHalf = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); props.push_back(grc::writeGByte((int)(jsonGetNumber(json, key, 0) * 2))); } };
     auto addGInt3 = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); writeAttrGInt3(props, (int)jsonGetNumber(json, key, 0)); } };
     auto addString = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); writeAttrString(props, jsonGetString(json, key)); } };
-    addByte(1, "1"); addHalf(2, "2"); addGInt3(3, "3"); addByte(4, "4"); addHalf(5, "5"); addHalf(6, "6");
+    addByte(RC_PLPROP_MAXPOWER, "1");
+    addHalf(RC_PLPROP_CURPOWER, "2");
+    addGInt3(RC_PLPROP_RUPEESCOUNT, "3");
+    addByte(RC_PLPROP_ARROWSCOUNT, "4");
+    addHalf(RC_PLPROP_BOMBSCOUNT, "5");
+    addHalf(RC_PLPROP_GLOVEPOWER, "6");
     if (jsonHasKey(json, "sword_power") || jsonHasKey(json, "sword_image")) {
         int power = (int)jsonGetNumber(json, "sword_power", 0);
         std::string img = jsonGetString(json, "sword_image");
-        props.push_back(grc::writeGByte(8));
+        props.push_back(grc::writeGByte(RC_PLPROP_SWORDPOWER));
         if (power == 0 && img.empty()) props.push_back(grc::writeGByte(0));
         else if (startsWithText(img, "sword") && img.size() > 9) {
             int idx = std::atoi(img.substr(5, img.size() - 9).c_str());
@@ -4222,7 +4238,7 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     if (jsonHasKey(json, "shield_power") || jsonHasKey(json, "shield_image")) {
         int power = (int)jsonGetNumber(json, "shield_power", 0);
         std::string img = jsonGetString(json, "shield_image");
-        props.push_back(grc::writeGByte(9));
+        props.push_back(grc::writeGByte(RC_PLPROP_SHIELDPOWER));
         if (power == 0 && img.empty()) props.push_back(grc::writeGByte(0));
         else if (startsWithText(img, "shield") && img.size() > 10) {
             int idx = std::atoi(img.substr(6, img.size() - 10).c_str());
@@ -4230,10 +4246,10 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
             else { int encoded = power + 10; if (encoded < 10) encoded = 10; if (encoded > 13) encoded = 13; props.push_back(grc::writeGByte(encoded)); writeAttrString(props, img); }
         } else { int encoded = power + 10; if (encoded < 10) encoded = 10; if (encoded > 13) encoded = 13; props.push_back(grc::writeGByte(encoded)); writeAttrString(props, img); }
     }
-    addString(10, "10");
+    addString(RC_PLPROP_GANI, "10");
     if (jsonHasKey(json, "head_image")) {
         std::string img = jsonGetString(json, "head_image");
-        props.push_back(grc::writeGByte(11));
+        props.push_back(grc::writeGByte(RC_PLPROP_HEADIMAGE));
         if (startsWithText(img, "head") && img.size() > 8) {
             int idx = std::atoi(img.substr(4, img.size() - 8).c_str());
             if (idx >= 0 && idx < 100) props.push_back(grc::writeGByte(idx));
@@ -4243,14 +4259,26 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     }
     std::vector<int> colors = jsonGetIntArray(json, "colors");
     if (!colors.empty()) {
-        props.push_back(grc::writeGByte(13));
+        props.push_back(grc::writeGByte(RC_PLPROP_COLORS));
         for (int i = 0; i < 5; ++i) props.push_back(grc::writeGByte(i < (int)colors.size() ? colors[i] : 0));
     }
-    addString(15, "15"); addString(16, "16"); addByte(17, "17"); addByte(18, "18"); addByte(19, "19"); addString(20, "20"); addString(21, "21"); addByte(26, "26");
-    addGInt3(27, "27"); addGInt3(28, "28"); addGInt3(29, "29"); addGInt3(30, "30"); addString(53, "body_image");
+    addString(RC_PLPROP_X, "15");
+    addString(RC_PLPROP_Y, "16");
+    addByte(RC_PLPROP_DIRECTION, "17");
+    addByte(RC_PLPROP_STATUS, "18");
+    addByte(RC_PLPROP_CARRYSPRITE, "19");
+    addString(RC_PLPROP_CURLEVEL, "20");
+    addString(RC_PLPROP_HORSEGIF, "21");
+    addByte(RC_PLPROP_MAGICPOINTS, "26");
+    addGInt3(RC_PLPROP_KILLSCOUNT, "27");
+    addGInt3(RC_PLPROP_DEATHSCOUNT, "28");
+    addGInt3(RC_PLPROP_ONLINESECS, "29");
+    addGInt3(RC_PLPROP_IPADDR, "30");
+    addString(RC_PLPROP_BODYIMAGE, "body_image");
+    addString(RC_PLPROP_PSTATUSMSG, "status_message");
     if (jsonHasKey(json, "rating") && jsonHasKey(json, "rating_dev")) {
         int rating = (int)jsonGetNumber(json, "rating", 0), rating_dev = (int)jsonGetNumber(json, "rating_dev", 0);
-        props.push_back(grc::writeGByte(36));
+        props.push_back(grc::writeGByte(RC_PLPROP_RATING));
         props.push_back(grc::writeGByte((rating >> 5) & 0xff));
         props.push_back(grc::writeGByte(((rating & 0x1f) << 2) | ((rating_dev >> 7) & 0x03)));
         props.push_back(grc::writeGByte(rating_dev & 0x7f));
