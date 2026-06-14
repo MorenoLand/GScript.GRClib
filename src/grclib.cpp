@@ -4082,7 +4082,7 @@ int rc_request_pm_server_players(RCHandle handle, const char* server_name) {
 const char* rc_last_error(RCHandle handle) {
     if (!handle) return "Invalid handle";
     RCConnection* conn = (RCConnection*)handle;
-    return conn->getError().c_str();
+    return conn->last_error.c_str();
 }
 void rc_free(void* ptr) {
     if (ptr) free(ptr);
