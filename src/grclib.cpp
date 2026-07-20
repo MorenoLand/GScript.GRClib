@@ -4067,6 +4067,25 @@ int rc_filebrowser_rename(RCHandle handle, const char* old_path, const char* new
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_RENAME, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
+int rc_filebrowser_move(RCHandle handle, const char* destination_folder, const char* file_path) {
+    if (!handle || !destination_folder || !file_path) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    std::string destination(destination_folder);
+    if (destination.empty()) return 0;
+    if (destination.back() != '/') destination.push_back('/');
+    if (destination.size() > 223) return 0;
+    std::vector<uint8_t> data;
+    data.reserve(destination.size() + strlen(file_path) + 1);
+    data.push_back(static_cast<uint8_t>(destination.size() + 32));
+    data.insert(data.end(), destination.begin(), destination.end());
+    data.insert(data.end(), file_path, file_path + strlen(file_path));
+    std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_MOVE, data);
+    if (!grc::sendAll(conn->game_socket, packet.data(), packet.size())) return 0;
+    std::vector<uint8_t> refresh(destination.begin(), destination.end());
+    packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_CD, refresh);
+    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+}
 int rc_request_server_options(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;

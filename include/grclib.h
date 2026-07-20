@@ -253,6 +253,7 @@ GRCLIB_API int rc_filebrowser_cd(RCHandle handle, const char* folder_path);
 GRCLIB_API int rc_filebrowser_download(RCHandle handle, const char* file_path);
 GRCLIB_API int rc_filebrowser_delete(RCHandle handle, const char* file_path);
 GRCLIB_API int rc_filebrowser_rename(RCHandle handle, const char* old_path, const char* new_path);
+GRCLIB_API int rc_filebrowser_move(RCHandle handle, const char* destination_folder, const char* file_path);
 GRCLIB_API int rc_request_pm_server_players(RCHandle handle, const char* server_name);
 GRCLIB_API const char* rc_last_error(RCHandle handle);
 GRCLIB_API void rc_free(void* ptr);
