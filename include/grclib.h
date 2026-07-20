@@ -211,6 +211,7 @@ GRCLIB_API char* rc_parse_player_account_text(const char* text);
 GRCLIB_API char* rc_parse_player_attributes_text(const char* text);
 GRCLIB_API int rc_is_new_protocol(RCHandle handle);
 GRCLIB_API void rc_set_new_protocol(RCHandle handle, int enabled);
+GRCLIB_API void rc_set_login_pcid_list(RCHandle handle, const char* pcid_list);
 GRCLIB_API int rc_request_local_npcs(RCHandle handle, const char* level);
 GRCLIB_API int rc_send_irc_text(RCHandle handle, const char* command, const char* param1, const char* param2, const char* param3);
 GRCLIB_API int rc_irc_login(RCHandle handle);

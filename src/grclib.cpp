@@ -742,6 +742,7 @@ struct RCConnection {
     std::string game_host;
     std::string account;
     std::string password;
+    std::string login_pcid_list;
     std::vector<grc::ServerInfo> servers;
     SOCKET game_socket;
     SOCKET nc_socket;
@@ -1632,11 +1633,6 @@ struct RCConnection {
                 break;
             }
             case PLO_RC_FILEBROWSER_DIRLIST: { // 65 - Folder list response
-                if (on_filebrowser_message) {
-                    pushEvent([this]() {
-                        on_filebrowser_message("Received file browser folder-list packet", on_filebrowser_message_data);
-                    });
-                }
                 std::string folder_list = grc::readCommaText(packet, offset);
                 std::vector<FileBrowserFolderCacheEntry> folders;
                 for (const auto& raw_line : splitText(folder_list, '\n')) {
@@ -1659,20 +1655,9 @@ struct RCConnection {
                         on_filebrowser_folders(count, on_filebrowser_folders_data);
                     }, "filebrowser_folders");
                 }
-                if (on_filebrowser_message) {
-                    std::string msg = "Received " + std::to_string(count) + " folders";
-                    pushEvent([this, msg]() {
-                        on_filebrowser_message(msg.c_str(), on_filebrowser_message_data);
-                    });
-                }
                 break;
             }
             case PLO_RC_FILEBROWSER_DIR: { // 66 - File listing response (with compression/encryption!)
-                if (on_filebrowser_message) {
-                    pushEvent([this]() {
-                        on_filebrowser_message("Received file browser directory packet", on_filebrowser_message_data);
-                    });
-                }
                 if (packet.size() == offset || (packet.size() == offset + 1 && packet[offset] == 0x20)) {
                     {
                         std::lock_guard<std::mutex> lock(cache_mutex);
@@ -4700,6 +4685,12 @@ void rc_set_new_protocol(RCHandle handle, int enabled) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
     conn->is_new_protocol = (enabled != 0);
+}
+
+void rc_set_login_pcid_list(RCHandle handle, const char* pcid_list) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->login_pcid_list = pcid_list ? pcid_list : "";
 }
 
 int rc_request_local_npcs(RCHandle handle, const char* level) {
