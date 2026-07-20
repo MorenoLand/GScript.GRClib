@@ -3020,6 +3020,10 @@ int rc_is_nc_authenticated(RCHandle handle) {
     if (!handle) return 0;
     return ((RCConnection*)handle)->nc_authenticated ? 1 : 0;
 }
+int rc_has_nc_server(RCHandle handle) {
+    if (!handle) return 0;
+    return ((RCConnection*)handle)->npc_server_address.empty() ? 0 : 1;
+}
 int rc_connect_to_nc_server(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
