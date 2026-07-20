@@ -1847,7 +1847,7 @@ struct RCConnection {
                     entry.path = filename;
                     entry.rights = rights;
                     entry.size = size_value;
-                    entry.modified = modified * 1000;
+                    entry.modified = modified;
                     entry.is_directory = !filename.empty() && filename[filename.size() - 1] == '/';
                     files.push_back(entry);
                 }
