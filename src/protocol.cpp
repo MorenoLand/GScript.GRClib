@@ -807,6 +807,8 @@ struct ServerInfo {
     int players;
     std::string language;
     std::string description;
+    std::string version;
+    std::string homepage;
 };
 static std::vector<ServerInfo> fetchServerList(const std::string& host, int port, const std::string& account, const std::string& password, std::string& error) {
     std::vector<ServerInfo> servers;
@@ -917,6 +919,8 @@ static std::vector<ServerInfo> fetchServerList(const std::string& host, int port
             info.name = attributes[0];
             info.language = attributes[1];
             info.description = attributes[2];
+            info.homepage = attributes[3];
+            info.version = attributes[4];
             info.players = std::atoi(attributes[5].c_str());
             info.ip = attributes[6];
             info.port = std::atoi(attributes[7].c_str());

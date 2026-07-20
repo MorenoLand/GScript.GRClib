@@ -20,6 +20,8 @@ typedef struct {
     int players;
     char* language;
     char* description;
+    char* version;
+    char* homepage;
 } RCServer;
 typedef struct {
     char* account;
@@ -78,6 +80,7 @@ typedef void (*RC_OnMaxUploadFileSize)(long long max_size, void* user_data);
 typedef void (*RC_OnCommandResponse)(const char* response, void* user_data);
 typedef void (*RC_OnRawPacket)(int packet_id, const char* data, int length, void* user_data);
 typedef void (*RC_OnPMServersUpdated)(int count, void* user_data);
+typedef void (*RC_OnPMGuildsUpdated)(int count, void* user_data);
 typedef void (*RC_OnNPCFlags)(int npc_id, const char* flags, void* user_data);
 typedef void (*RC_OnPMServerPlayers)(const char* server_name, const char* player_data, void* user_data);
 typedef void (*RC_OnFileBrowserFolders)(int count, void* user_data);
@@ -121,6 +124,7 @@ GRCLIB_API void rc_on_max_upload_file_size(RCHandle handle, RC_OnMaxUploadFileSi
 GRCLIB_API void rc_on_command_response(RCHandle handle, RC_OnCommandResponse callback, void* user_data);
 GRCLIB_API void rc_on_raw_packet(RCHandle handle, RC_OnRawPacket callback, void* user_data);
 GRCLIB_API void rc_on_pm_servers_updated(RCHandle handle, RC_OnPMServersUpdated callback, void* user_data);
+GRCLIB_API void rc_on_pm_guilds_updated(RCHandle handle, RC_OnPMGuildsUpdated callback, void* user_data);
 GRCLIB_API void rc_on_npc_flags(RCHandle handle, RC_OnNPCFlags callback, void* user_data);
 GRCLIB_API void rc_on_pm_server_players(RCHandle handle, RC_OnPMServerPlayers callback, void* user_data);
 GRCLIB_API void rc_on_filebrowser_folders(RCHandle handle, RC_OnFileBrowserFolders callback, void* user_data);
@@ -142,6 +146,7 @@ GRCLIB_API int rc_get_classes(RCHandle handle, RCClass** classes_out);
 GRCLIB_API int rc_get_npcs(RCHandle handle, RCNPC** npcs_out);
 GRCLIB_API int rc_get_levels(RCHandle handle, RCLevel** levels_out);
 GRCLIB_API int rc_get_pm_servers(RCHandle handle, const char*** servers_out);
+GRCLIB_API int rc_get_pm_guilds(RCHandle handle, const char*** guilds_out);
 GRCLIB_API char* rc_get_cached_npc_flags(RCHandle handle, int npc_id);
 GRCLIB_API int rc_get_filebrowser_folders(RCHandle handle, RCFileBrowserFolder** folders_out);
 GRCLIB_API int rc_get_filebrowser_files(RCHandle handle, RCFileBrowserEntry** entries_out);
@@ -173,6 +178,7 @@ GRCLIB_API int rc_upload_level(RCHandle handle, const char* level_name, const ch
 GRCLIB_API int rc_download_level(RCHandle handle, const char* level_name);
 GRCLIB_API int rc_request_server_list(RCHandle handle);
 GRCLIB_API int rc_request_pm_server_list(RCHandle handle);
+GRCLIB_API int rc_request_pm_guild_list(RCHandle handle);
 GRCLIB_API int rc_send_toall_message(RCHandle handle, const char* message);
 GRCLIB_API int rc_request_npc_script(RCHandle handle, int npc_id);
 GRCLIB_API int rc_request_npc_attributes(RCHandle handle, int npc_id);

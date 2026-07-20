@@ -769,6 +769,8 @@ struct RCConnection {
     std::vector<RCLevel> level_cache;
     std::vector<std::string> pm_server_cache;
     std::vector<const char*> pm_server_ptr_cache;
+    std::vector<std::string> pm_guild_cache;
+    std::vector<const char*> pm_guild_ptr_cache;
     std::map<int, std::string> npc_flags_cache;
     std::vector<FileBrowserFolderCacheEntry> filebrowser_folders;
     std::vector<RCFileBrowserFolder> filebrowser_folder_view;
@@ -826,6 +828,8 @@ struct RCConnection {
     void* on_raw_packet_data;
     RC_OnPMServersUpdated on_pm_servers_updated;
     void* on_pm_servers_updated_data;
+    RC_OnPMGuildsUpdated on_pm_guilds_updated;
+    void* on_pm_guilds_updated_data;
     RC_OnNPCFlags on_npc_flags;
     void* on_npc_flags_data;
     RC_OnPMServerPlayers on_pm_server_players;
@@ -873,7 +877,7 @@ struct RCConnection {
         on_npc_attributes(nullptr), on_npc_attributes_data(nullptr),
         on_player_prop_changed(nullptr), on_player_prop_changed_data(nullptr), on_world_time(nullptr), on_world_time_data(nullptr),
         on_max_upload_file_size(nullptr), on_max_upload_file_size_data(nullptr), on_command_response(nullptr), on_command_response_data(nullptr),
-        on_raw_packet(nullptr), on_raw_packet_data(nullptr), on_pm_servers_updated(nullptr), on_pm_servers_updated_data(nullptr),
+        on_raw_packet(nullptr), on_raw_packet_data(nullptr), on_pm_servers_updated(nullptr), on_pm_servers_updated_data(nullptr), on_pm_guilds_updated(nullptr), on_pm_guilds_updated_data(nullptr),
         on_npc_flags(nullptr), on_npc_flags_data(nullptr), on_pm_server_players(nullptr), on_pm_server_players_data(nullptr),
         on_filebrowser_folders(nullptr), on_filebrowser_folders_data(nullptr),
         on_filebrowser_files(nullptr), on_filebrowser_files_data(nullptr), on_filebrowser_message(nullptr), on_filebrowser_message_data(nullptr),
@@ -2023,6 +2027,25 @@ struct RCConnection {
                                 if (on_pm_servers_updated) on_pm_servers_updated(count, on_pm_servers_updated_data);
                             });
                         }
+                    } else if (parts[1] == "pmguilds") {
+                        std::vector<std::string> names;
+                        for (size_t i = 2; i < parts.size(); ++i) {
+                            std::vector<std::string> entries = splitText(parts[i], ',');
+                            for (const auto& entry : entries) {
+                                std::string guild_name = trimText(entry);
+                                if (!guild_name.empty()) names.push_back(guild_name);
+                            }
+                        }
+                        {
+                            std::lock_guard<std::mutex> lock(cache_mutex);
+                            pm_guild_cache = names;
+                            pm_guild_ptr_cache.clear();
+                            for (const auto& guild_name : pm_guild_cache) pm_guild_ptr_cache.push_back(guild_name.c_str());
+                        }
+                        if (on_pm_guilds_updated) {
+                            const int count = static_cast<int>(names.size());
+                            pushEvent([this, count]() { if (on_pm_guilds_updated) on_pm_guilds_updated(count, on_pm_guilds_updated_data); });
+                        }
                     } else if (parts[1] == "pmserverplayers") {
                         std::string server_name = parts[2];
                         std::string player_data;
@@ -2912,6 +2935,8 @@ int rc_get_servers(RCHandle handle, RCServer** servers_out) {
         rc_server.players = server.players;
         rc_server.language = grcStrdup(server.language.c_str());
         rc_server.description = grcStrdup(server.description.c_str());
+        rc_server.version = grcStrdup(server.version.c_str());
+        rc_server.homepage = grcStrdup(server.homepage.c_str());
         conn->server_cache.push_back(rc_server);
     }
     *servers_out = conn->server_cache.data();
@@ -2966,7 +2991,7 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
     std::string login_payload = "vGSERV025";
     login_payload += grc::get1PlusTextNetString(conn->account);
     login_payload += grc::get1PlusTextNetString(conn->password);
-    login_payload += grc::generatePcidList();
+    login_payload += conn->login_pcid_list.empty() ? grc::generatePcidList() : conn->login_pcid_list;
     std::vector<uint8_t> login_data(login_payload.begin(), login_payload.end());
     std::vector<uint8_t> login_packet = conn->protocol.sendPacket(PLI_TOALL, login_data);
     conn->protocol.setEncryptionKey(0x56);
@@ -3194,6 +3219,12 @@ void rc_on_pm_servers_updated(RCHandle handle, RC_OnPMServersUpdated callback, v
     conn->on_pm_servers_updated = callback;
     conn->on_pm_servers_updated_data = user_data;
 }
+void rc_on_pm_guilds_updated(RCHandle handle, RC_OnPMGuildsUpdated callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_pm_guilds_updated = callback;
+    conn->on_pm_guilds_updated_data = user_data;
+}
 void rc_on_npc_flags(RCHandle handle, RC_OnNPCFlags callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
@@ -3329,6 +3360,15 @@ int rc_get_pm_servers(RCHandle handle, const char*** servers_out) {
     }
     *servers_out = conn->pm_server_ptr_cache.data();
     return static_cast<int>(conn->pm_server_ptr_cache.size());
+}
+int rc_get_pm_guilds(RCHandle handle, const char*** guilds_out) {
+    if (!handle || !guilds_out) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    conn->pm_guild_ptr_cache.clear();
+    for (const auto& guild_name : conn->pm_guild_cache) conn->pm_guild_ptr_cache.push_back(guild_name.c_str());
+    *guilds_out = conn->pm_guild_ptr_cache.data();
+    return static_cast<int>(conn->pm_guild_ptr_cache.size());
 }
 char* rc_get_cached_npc_flags(RCHandle handle, int npc_id) {
     if (!handle) return nullptr;
@@ -3677,6 +3717,16 @@ int rc_request_pm_server_list(RCHandle handle) {
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->connected || !conn->authenticated) return 0;
     std::string request = protocolTextNamespace() + "\npmservers\nall\n";
+    std::string tokenized = grc::gtokenizeString(request);
+    std::vector<uint8_t> data(tokenized.begin(), tokenized.end());
+    std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_REQUESTTEXT, data);
+    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+}
+int rc_request_pm_guild_list(RCHandle handle) {
+    if (!handle) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->connected || !conn->authenticated) return 0;
+    std::string request = protocolTextNamespace() + "\npmguilds\n\n";
     std::string tokenized = grc::gtokenizeString(request);
     std::vector<uint8_t> data(tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_REQUESTTEXT, data);
