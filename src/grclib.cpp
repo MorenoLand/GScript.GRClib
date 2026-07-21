@@ -1518,7 +1518,7 @@ struct RCConnection {
                             }
                             if (!account_from_props.empty()) account = account_from_props;
                             if (player_id >= 16000 && !pending_pm_server_name.empty()) {
-                                std::string player = nickname.empty() ? account : nickname;
+                                std::string player = std::to_string(player_id) + "\t" + account + "\t" + (nickname.empty() ? account : nickname) + "\t" + level;
                                 pending_pm_server_players.push_back(player);
                                 if (on_pm_server_players) {
                                     const std::string server_name = pending_pm_server_name;
