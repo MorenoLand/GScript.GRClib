@@ -2693,15 +2693,21 @@ struct RCConnection {
                             break;
                         }
                     }
-                    RCNPC npc;
-                    npc.id = npc_id;
-                    npc.name = grcStrdup(name.c_str());
-                    npc.type = grcStrdup(type.c_str());
-                    npc.image = grcStrdup("");
-                    npc.script = grcStrdup("");
                     {
                         std::lock_guard<std::mutex> lock(cache_mutex);
-                        npc_cache.push_back(npc);
+                        auto existing = std::find_if(npc_cache.begin(), npc_cache.end(), [npc_id](const RCNPC& npc) { return npc.id == npc_id; });
+                        if (existing == npc_cache.end()) {
+                            RCNPC npc;
+                            npc.id = npc_id;
+                            npc.name = grcStrdup(name.c_str());
+                            npc.type = grcStrdup(type.c_str());
+                            npc.image = grcStrdup("");
+                            npc.script = grcStrdup("");
+                            npc_cache.push_back(npc);
+                        } else {
+                            if (!name.empty()) { free(existing->name); existing->name = grcStrdup(name.c_str()); }
+                            if (!type.empty()) { free(existing->type); existing->type = grcStrdup(type.c_str()); }
+                        }
                     }
                     if (on_npc_added) {
                         pushEvent([this, npc_id, name]() {
