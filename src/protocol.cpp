@@ -900,7 +900,8 @@ static std::vector<ServerInfo> fetchServerList(const std::string& host, int port
     size_t offset = 0;
     uint8_t packet_type = decodeGByte(decompressed[offset++]);
     if (packet_type != 0) {
-        error = "Server rejected connection";
+        if (packet_type == 4 && offset < decompressed.size()) error.assign(decompressed.begin() + offset, decompressed.end());
+        else error = "Server rejected connection";
         return servers;
     }
     uint8_t server_count = decodeGByte(decompressed[offset++]);

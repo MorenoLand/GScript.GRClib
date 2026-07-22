@@ -4331,8 +4331,8 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     addHalf(RC_PLPROP_CURPOWER, "2");
     addGInt3(RC_PLPROP_RUPEESCOUNT, "3");
     addByte(RC_PLPROP_ARROWSCOUNT, "4");
-    addHalf(RC_PLPROP_BOMBSCOUNT, "5");
-    addHalf(RC_PLPROP_GLOVEPOWER, "6");
+    addByte(RC_PLPROP_BOMBSCOUNT, "5");
+    addByte(RC_PLPROP_GLOVEPOWER, "6");
     if (jsonHasKey(json, "sword_power") || jsonHasKey(json, "sword_image")) {
         int power = (int)jsonGetNumber(json, "sword_power", 0);
         std::string img = jsonGetString(json, "sword_image");
@@ -4371,8 +4371,8 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
         props.push_back(grc::writeGByte(RC_PLPROP_COLORS));
         for (int i = 0; i < 5; ++i) props.push_back(grc::writeGByte(i < (int)colors.size() ? colors[i] : 0));
     }
-    addString(RC_PLPROP_X, "15");
-    addString(RC_PLPROP_Y, "16");
+    addHalf(RC_PLPROP_X, "15");
+    addHalf(RC_PLPROP_Y, "16");
     addByte(RC_PLPROP_DIRECTION, "17");
     addByte(RC_PLPROP_STATUS, "18");
     addByte(RC_PLPROP_CARRYSPRITE, "19");
@@ -4548,14 +4548,15 @@ char* rc_format_player_attributes_text(const char* properties_json) {
     text << "Belt Color: " << colorName(colors[4]) << "\n\n";
 
     text << "[Basic Attributes]\n";
-    text << "Level: " << jsonGetString(json, "20") << "\n";
-    text << "X: " << (int)(jsonGetNumber(json, "5", 0) / 2.0) << "\n";
-    text << "Y: " << (int)(jsonGetNumber(json, "6", 0) / 2.0) << "\n";
-    text << "Hearts: " << (int)jsonGetNumber(json, "1", 0) << "\n";
-    text << "Full Hearts: " << jsonGetNumber(json, "2", 0) << "\n";
-    text << "MP: " << (int)jsonGetNumber(json, "27", 0) << "\n";
-    text << "Gralats: " << (int)jsonGetNumber(json, "30", 0) << "\n";
-    text << "Glove: " << (int)jsonGetNumber(json, "17", 0) << "\n";
+    text << "Level: " << jsonGetString(json, "level") << "\n";
+    text << "X: " << jsonGetNumber(json, "15", 0) << "\n";
+    text << "Y: " << jsonGetNumber(json, "16", 0) << "\n";
+    text << "Hearts: " << jsonGetNumber(json, "2", 0) << "\n";
+    text << "Full Hearts: " << (int)jsonGetNumber(json, "1", 0) << "\n";
+    text << "AP: " << (int)jsonGetNumber(json, "25", 0) << "\n";
+    text << "MP: " << (int)jsonGetNumber(json, "26", 0) << "\n";
+    text << "Gralats: " << (int)jsonGetNumber(json, "3", 0) << "\n";
+    text << "Glove: " << (int)jsonGetNumber(json, "6", 0) << "\n";
     text << "Bombs: " << (int)jsonGetNumber(json, "19", 0) << "\n";
     text << "Arrows: " << (int)jsonGetNumber(json, "4", 0) << "\n";
     text << "Sword Power: " << jsonGetNumber(json, "sword_power", 0) << "\n";
@@ -4706,14 +4707,15 @@ char* rc_parse_player_attributes_text(const char* text_ptr) {
             else if (label == "Shoes Color") colors[3] = colorIndexFromText(value);
             else if (label == "Belt Color") colors[4] = colorIndexFromText(value);
             else if (label == "Level") strings["20"] = value;
-            else if (label == "X") numbers["5"] = std::atof(value.c_str());
-            else if (label == "Y") numbers["6"] = std::atof(value.c_str());
-            else if (label == "Hearts") numbers["1"] = std::atof(value.c_str());
-            else if (label == "Full Hearts") numbers["2"] = std::atof(value.c_str()) * 2.0;
-            else if (label == "MP") numbers["27"] = std::atof(value.c_str());
-            else if (label == "Gralats") numbers["30"] = std::atof(value.c_str());
-            else if (label == "Glove") numbers["17"] = std::atof(value.c_str());
-            else if (label == "Bombs") numbers["19"] = std::atof(value.c_str());
+            else if (label == "X") numbers["15"] = std::atof(value.c_str());
+            else if (label == "Y") numbers["16"] = std::atof(value.c_str());
+            else if (label == "Hearts") numbers["2"] = std::atof(value.c_str());
+            else if (label == "Full Hearts") numbers["1"] = std::atof(value.c_str());
+            else if (label == "AP") numbers["25"] = std::atof(value.c_str());
+            else if (label == "MP") numbers["26"] = std::atof(value.c_str());
+            else if (label == "Gralats") numbers["3"] = std::atof(value.c_str());
+            else if (label == "Glove") numbers["6"] = std::atof(value.c_str());
+            else if (label == "Bombs") numbers["5"] = std::atof(value.c_str());
             else if (label == "Arrows") numbers["4"] = std::atof(value.c_str());
             else if (label == "Sword Power") strings["sword_power"] = value;
             else if (label == "Sword Image") strings["sword_image"] = value;
