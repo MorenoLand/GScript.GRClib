@@ -789,6 +789,8 @@ struct RCConnection {
     std::mutex transfer_mutex;
     std::queue<std::pair<std::string, std::function<void()>>> event_queue;
     std::mutex event_mutex;
+    std::vector<std::string> pending_chat_messages;
+    std::vector<std::pair<std::string, std::string>> pending_server_data;
     RC_OnConnected on_connected;
     void* on_connected_data;
     RC_OnDisconnected on_disconnected;
@@ -902,6 +904,26 @@ struct RCConnection {
     void pushEvent(std::function<void()> callback, const std::string& label = "event") {
         std::lock_guard<std::mutex> lock(event_mutex);
         event_queue.push(std::make_pair(label, callback));
+    }
+    void emitMessage(std::string message) {
+        std::lock_guard<std::mutex> lock(callback_mutex);
+        if (!on_message) {
+            pending_chat_messages.push_back(std::move(message));
+            return;
+        }
+        RC_OnMessage callback = on_message;
+        void* data = on_message_data;
+        pushEvent([callback, data, message = std::move(message)]() { callback(message.c_str(), data); });
+    }
+    void emitServerData(std::string type, std::string content) {
+        std::lock_guard<std::mutex> lock(callback_mutex);
+        if (!on_server_data) {
+            pending_server_data.emplace_back(std::move(type), std::move(content));
+            return;
+        }
+        RC_OnServerData callback = on_server_data;
+        void* data = on_server_data_data;
+        pushEvent([callback, data, type = std::move(type), content = std::move(content)]() { callback(type.c_str(), content.c_str(), data); });
     }
     void clearFileBrowserFolderView() {
         for (auto& item : filebrowser_folder_view) {
@@ -1112,7 +1134,7 @@ struct RCConnection {
             case PLO_RC_CHAT: { // 74 - RC chat message
                 std::string message(packet.begin() + offset, packet.end());
                 message = grc::replaceAll(message, " of +", " of ");
-                if (on_message) pushEvent([this, message]() { on_message(message.c_str(), on_message_data); });
+                emitMessage(std::move(message));
                 if (on_raw_packet) {
                     std::vector<uint8_t> payload(packet.begin() + offset, packet.end());
                     pushEvent([this, packet_id, payload]() {
@@ -2023,8 +2045,10 @@ struct RCConnection {
                     parts.push_back(untokenized.substr(start, end - start));
                     start = end + 1;
                 }
+                bool handled_server_text = false;
                 if (parts.size() >= 3 && parts[0] == protocolTextNamespace()) {
                     if (parts[1] == "pmservers") {
+                        handled_server_text = true;
                         std::vector<std::string> names;
                         for (size_t i = 2; i < parts.size(); ++i) {
                             std::vector<std::string> entries = splitText(parts[i], ',');
@@ -2050,6 +2074,7 @@ struct RCConnection {
                             });
                         }
                     } else if (parts[1] == "pmguilds") {
+                        handled_server_text = true;
                         std::vector<std::string> names;
                         for (size_t i = 2; i < parts.size(); ++i) {
                             std::vector<std::string> entries = splitText(parts[i], ',');
@@ -2069,6 +2094,7 @@ struct RCConnection {
                             pushEvent([this, count]() { if (on_pm_guilds_updated) on_pm_guilds_updated(count, on_pm_guilds_updated_data); });
                         }
                     } else if (parts[1] == "pmserverplayers") {
+                        handled_server_text = true;
                         std::string server_name = parts[2];
                         std::string player_data;
                         for (size_t i = 3; i < parts.size(); ++i) {
@@ -2081,6 +2107,7 @@ struct RCConnection {
                             });
                         }
                     } else if (parts[1] == "irc" && parts.size() >= 3) {
+                        handled_server_text = true;
                         std::string command = parts[2];
                         if (command == "join" && parts.size() >= 4) {
                             std::string channel = parts[3];
@@ -2102,6 +2129,7 @@ struct RCConnection {
                             });
                         }
                     } else if (parts[1] == "lister" && parts.size() >= 3 && parts[2] != "simpleserverlist") {
+                        handled_server_text = true;
                         std::string command = parts[2];
                         if (command == "ban") {
                             std::string account = (parts.size() > 3) ? parts[3] : pending_ban_account;
@@ -2143,6 +2171,7 @@ struct RCConnection {
                             }
                         }
                     } else if (parts[1] == "lister" && parts[2] == "simpleserverlist") {
+                        handled_server_text = true;
                         std::string server_data_str;
                         for (size_t i = 3; i < parts.size(); ++i) {
                             if (i > 3) server_data_str += ",";
@@ -2188,6 +2217,10 @@ struct RCConnection {
                             }
                         }
                     }
+                }
+                if (!handled_server_text) {
+                    std::string text = (parts.size() >= 3 && parts[0] == protocolTextNamespace()) ? parts[1] + ": " + joinText(parts, 2, "\n") : untokenized;
+                    emitServerData("server_text", std::move(text));
                 }
                 break;
             }
@@ -3162,8 +3195,13 @@ void rc_on_player_left(RCHandle handle, RC_OnPlayerLeft callback, void* user_dat
 void rc_on_message(RCHandle handle, RC_OnMessage callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->callback_mutex);
     conn->on_message = callback;
     conn->on_message_data = user_data;
+    for (std::string& message : conn->pending_chat_messages) {
+        conn->pushEvent([callback, user_data, message = std::move(message)]() { callback(message.c_str(), user_data); });
+    }
+    conn->pending_chat_messages.clear();
 }
 void rc_on_private_message(RCHandle handle, RC_OnPrivateMessage callback, void* user_data) {
     if (!handle) return;
@@ -3306,8 +3344,13 @@ void rc_on_script_received(RCHandle handle, RC_OnScriptReceived callback, void* 
 void rc_on_server_data(RCHandle handle, RC_OnServerData callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->callback_mutex);
     conn->on_server_data = callback;
     conn->on_server_data_data = user_data;
+    for (auto& event : conn->pending_server_data) {
+        conn->pushEvent([callback, user_data, type = std::move(event.first), content = std::move(event.second)]() { callback(type.c_str(), content.c_str(), user_data); });
+    }
+    conn->pending_server_data.clear();
 }
 void rc_on_player_rights(RCHandle handle, RC_OnPlayerRights callback, void* user_data) {
     if (!handle) return;
