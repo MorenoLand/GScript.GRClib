@@ -2505,6 +2505,7 @@ struct RCConnection {
             if (npc.type) free(npc.type);
             if (npc.image) free(npc.image);
             if (npc.script) free(npc.script);
+            if (npc.level) free(npc.level);
         }
         npc_cache.clear();
     }
@@ -2727,10 +2728,12 @@ struct RCConnection {
                             npc.type = grcStrdup(type.c_str());
                             npc.image = grcStrdup("");
                             npc.script = grcStrdup("");
+                            npc.level = grcStrdup(level.c_str());
                             npc_cache.push_back(npc);
                         } else {
                             if (!name.empty()) { free(existing->name); existing->name = grcStrdup(name.c_str()); }
                             if (!type.empty()) { free(existing->type); existing->type = grcStrdup(type.c_str()); }
+                            if (!level.empty()) { free(existing->level); existing->level = grcStrdup(level.c_str()); }
                         }
                     }
                     if (on_npc_added) {
@@ -2753,6 +2756,7 @@ struct RCConnection {
                                 free(it->type);
                                 free(it->image);
                                 free(it->script);
+                                free(it->level);
                                 it = npc_cache.erase(it);
                                 break;
                             } else {
@@ -4877,7 +4881,7 @@ int rc_update_levels(RCHandle handle, const char* const* levels, int count) {
     if (!handle || !levels || count <= 0) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
-    const int encodedCount = std::min(count, 0x6fff);
+    const int encodedCount = (std::min)(count, 0x6fff);
     std::vector<uint8_t> data;
     data.reserve(2 + encodedCount * 2);
     data.push_back(static_cast<uint8_t>((encodedCount >> 7) + 0x20));

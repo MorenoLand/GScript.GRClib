@@ -44,6 +44,7 @@ typedef struct {
     char* type;
     char* image;
     char* script;
+    char* level;
 } RCNPC;
 typedef struct {
     char* name;
