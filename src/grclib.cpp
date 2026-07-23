@@ -2045,8 +2045,9 @@ struct RCConnection {
                     parts.push_back(untokenized.substr(start, end - start));
                     start = end + 1;
                 }
-                bool handled_server_text = false;
-                if (parts.size() >= 3 && parts[0] == protocolTextNamespace()) {
+                const bool protocol_text = parts.size() >= 2 && parts[0] == protocolTextNamespace();
+                bool handled_server_text = protocol_text;
+                if (protocol_text) {
                     if (parts[1] == "pmservers") {
                         handled_server_text = true;
                         std::vector<std::string> names;
@@ -2093,7 +2094,7 @@ struct RCConnection {
                             const int count = static_cast<int>(names.size());
                             pushEvent([this, count]() { if (on_pm_guilds_updated) on_pm_guilds_updated(count, on_pm_guilds_updated_data); });
                         }
-                    } else if (parts[1] == "pmserverplayers") {
+                    } else if (parts[1] == "pmserverplayers" && parts.size() >= 3) {
                         handled_server_text = true;
                         std::string server_name = parts[2];
                         std::string player_data;
@@ -2219,7 +2220,7 @@ struct RCConnection {
                     }
                 }
                 if (!handled_server_text) {
-                    std::string text = (parts.size() >= 3 && parts[0] == protocolTextNamespace()) ? parts[1] + ": " + joinText(parts, 2, "\n") : untokenized;
+                    std::string text = untokenized;
                     emitServerData("server_text", std::move(text));
                 }
                 break;
