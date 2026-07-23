@@ -823,6 +823,8 @@ struct RCConnection {
     void* on_npc_attributes_data;
     RC_OnPlayerPropChanged on_player_prop_changed;
     void* on_player_prop_changed_data;
+    RC_OnPlayerPropertiesChanged on_player_properties_changed;
+    void* on_player_properties_changed_data;
     RC_OnWorldTime on_world_time;
     void* on_world_time_data;
     RC_OnMaxUploadFileSize on_max_upload_file_size;
@@ -882,7 +884,7 @@ struct RCConnection {
         on_class_added(nullptr), on_class_added_data(nullptr), on_class_deleted(nullptr), on_class_deleted_data(nullptr),
         on_npc_added(nullptr), on_npc_added_data(nullptr), on_npc_deleted(nullptr), on_npc_deleted_data(nullptr),
         on_npc_attributes(nullptr), on_npc_attributes_data(nullptr),
-        on_player_prop_changed(nullptr), on_player_prop_changed_data(nullptr), on_world_time(nullptr), on_world_time_data(nullptr),
+        on_player_prop_changed(nullptr), on_player_prop_changed_data(nullptr), on_player_properties_changed(nullptr), on_player_properties_changed_data(nullptr), on_world_time(nullptr), on_world_time_data(nullptr),
         on_max_upload_file_size(nullptr), on_max_upload_file_size_data(nullptr), on_command_response(nullptr), on_command_response_data(nullptr),
         on_raw_packet(nullptr), on_raw_packet_data(nullptr), on_pm_servers_updated(nullptr), on_pm_servers_updated_data(nullptr), on_pm_guilds_updated(nullptr), on_pm_guilds_updated_data(nullptr),
         on_npc_flags(nullptr), on_npc_flags_data(nullptr), on_pm_server_players(nullptr), on_pm_server_players_data(nullptr),
@@ -1086,10 +1088,16 @@ struct RCConnection {
             case PLO_RC_ACCOUNTPROPS:
             case PLO_RC_ACCOUNTPROPSGET:
             case PLO_RC_ACCOUNTCHANGE:
-            case PLO_RC_PLAYERPROPSCHANGE:
             case PLO_UNKNOWN60:
             case PLO_RC_PLAYERPROPS: {
                 emitServerDataPacket(incomingRcPacketName(packet_id), offset);
+                break;
+            }
+            case PLO_RC_PLAYERPROPSCHANGE: {
+                if (offset + 2 > packet.size()) break;
+                const int playerId = grc::decodeGShort(packet.data() + offset);
+                std::string properties(packet.begin() + offset + 2, packet.end());
+                if (on_player_properties_changed) pushEvent([this, playerId, properties]() { on_player_properties_changed(playerId, properties.c_str(), on_player_properties_changed_data); });
                 break;
             }
             case PLO_RC_ACCOUNTLISTGET: {
@@ -3293,6 +3301,12 @@ void rc_on_pm_servers_updated(RCHandle handle, RC_OnPMServersUpdated callback, v
     RCConnection* conn = (RCConnection*)handle;
     conn->on_pm_servers_updated = callback;
     conn->on_pm_servers_updated_data = user_data;
+}
+void rc_on_player_properties_changed(RCHandle handle, RC_OnPlayerPropertiesChanged callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_player_properties_changed = callback;
+    conn->on_player_properties_changed_data = user_data;
 }
 void rc_on_private_message_ex(RCHandle handle, RC_OnPrivateMessageEx callback, void* user_data) {
     if (!handle) return;

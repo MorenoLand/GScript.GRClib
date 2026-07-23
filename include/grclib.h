@@ -77,6 +77,7 @@ typedef void (*RC_OnNPCAdded)(int id, const char* name, void* user_data);
 typedef void (*RC_OnNPCDeleted)(int id, void* user_data);
 typedef void (*RC_OnNPCAttributes)(int npc_id, const char* attributes, void* user_data);
 typedef void (*RC_OnPlayerPropChanged)(int player_id, const char* prop, const char* value, void* user_data);
+typedef void (*RC_OnPlayerPropertiesChanged)(int player_id, const char* properties, void* user_data);
 typedef void (*RC_OnWorldTime)(int world_time, void* user_data);
 typedef void (*RC_OnMaxUploadFileSize)(long long max_size, void* user_data);
 typedef void (*RC_OnCommandResponse)(const char* response, void* user_data);
@@ -123,6 +124,7 @@ GRCLIB_API void rc_on_npc_added(RCHandle handle, RC_OnNPCAdded callback, void* u
 GRCLIB_API void rc_on_npc_deleted(RCHandle handle, RC_OnNPCDeleted callback, void* user_data);
 GRCLIB_API void rc_on_npc_attributes(RCHandle handle, RC_OnNPCAttributes callback, void* user_data);
 GRCLIB_API void rc_on_player_prop_changed(RCHandle handle, RC_OnPlayerPropChanged callback, void* user_data);
+GRCLIB_API void rc_on_player_properties_changed(RCHandle handle, RC_OnPlayerPropertiesChanged callback, void* user_data);
 GRCLIB_API void rc_on_world_time(RCHandle handle, RC_OnWorldTime callback, void* user_data);
 GRCLIB_API void rc_on_max_upload_file_size(RCHandle handle, RC_OnMaxUploadFileSize callback, void* user_data);
 GRCLIB_API void rc_on_command_response(RCHandle handle, RC_OnCommandResponse callback, void* user_data);
