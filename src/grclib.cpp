@@ -811,6 +811,8 @@ struct RCConnection {
     void* on_weapon_added_data;
     RC_OnWeaponDeleted on_weapon_deleted;
     void* on_weapon_deleted_data;
+    RC_OnWeaponListReceived on_weapon_list_received;
+    void* on_weapon_list_received_data;
     RC_OnClassAdded on_class_added;
     void* on_class_added_data;
     RC_OnClassDeleted on_class_deleted;
@@ -880,7 +882,7 @@ struct RCConnection {
         on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr),
         on_player_joined(nullptr), on_player_joined_data(nullptr), on_player_left(nullptr), on_player_left_data(nullptr),
         on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr),
-        on_weapon_added(nullptr), on_weapon_added_data(nullptr), on_weapon_deleted(nullptr), on_weapon_deleted_data(nullptr),
+        on_weapon_added(nullptr), on_weapon_added_data(nullptr), on_weapon_deleted(nullptr), on_weapon_deleted_data(nullptr), on_weapon_list_received(nullptr), on_weapon_list_received_data(nullptr),
         on_class_added(nullptr), on_class_added_data(nullptr), on_class_deleted(nullptr), on_class_deleted_data(nullptr),
         on_npc_added(nullptr), on_npc_added_data(nullptr), on_npc_deleted(nullptr), on_npc_deleted_data(nullptr),
         on_npc_attributes(nullptr), on_npc_attributes_data(nullptr),
@@ -2609,6 +2611,7 @@ struct RCConnection {
                     }
                     weapon_count++;
                 }
+                if (on_weapon_list_received) pushEvent([this, weapon_count]() { on_weapon_list_received(weapon_count, on_weapon_list_received_data); });
                 break;
             }
             case PLO_NC_CLASSADD: { // 163 - Class added
@@ -3236,6 +3239,12 @@ void rc_on_weapon_deleted(RCHandle handle, RC_OnWeaponDeleted callback, void* us
     conn->on_weapon_deleted = callback;
     conn->on_weapon_deleted_data = user_data;
 }
+void rc_on_weapon_list_received(RCHandle handle, RC_OnWeaponListReceived callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_weapon_list_received = callback;
+    conn->on_weapon_list_received_data = user_data;
+}
 void rc_on_class_added(RCHandle handle, RC_OnClassAdded callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
@@ -3592,7 +3601,12 @@ int rc_execute(RCHandle handle, const char* command) {
     if (!conn->connected || !conn->authenticated) return 0;
     std::vector<uint8_t> data(command, command + strlen(command));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_CHAT, data);
-    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+    if (!grc::sendAll(conn->game_socket, packet.data(), packet.size())) return 0;
+    if (conn->nc_connected && conn->nc_authenticated && conn->nc_socket != INVALID_SOCKET) {
+        std::vector<uint8_t> ncPacket = conn->nc_protocol.sendPacket(PLI_RC_CHAT, data);
+        if (!grc::sendAll(conn->nc_socket, ncPacket.data(), ncPacket.size())) return 0;
+    }
+    return 1;
 }
 int rc_upload_file(RCHandle handle, const char* path, const char* content, int length) {
     if (!handle || !path || !content) return 0;
@@ -3870,6 +3884,13 @@ int rc_request_class_script(RCHandle handle, const char* class_name) {
     std::vector<uint8_t> data(class_name, class_name + strlen(class_name));
     data.push_back('\n');
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSEDIT, data);
+    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+}
+int rc_request_weapon_list(RCHandle handle) {
+    if (!handle) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->nc_connected || !conn->nc_authenticated) return 0;
+    std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
     return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
 }
 int rc_request_weapon_script(RCHandle handle, const char* weapon_name) {

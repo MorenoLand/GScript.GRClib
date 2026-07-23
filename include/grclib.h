@@ -71,6 +71,7 @@ typedef void (*RC_OnPrivateMessageEx)(int player_id, const char* account, const 
 typedef void (*RC_OnFileReceived)(const char* path, const void* content, int length, void* user_data);
 typedef void (*RC_OnWeaponAdded)(const char* name, void* user_data);
 typedef void (*RC_OnWeaponDeleted)(const char* name, void* user_data);
+typedef void (*RC_OnWeaponListReceived)(int count, void* user_data);
 typedef void (*RC_OnClassAdded)(const char* name, void* user_data);
 typedef void (*RC_OnClassDeleted)(const char* name, void* user_data);
 typedef void (*RC_OnNPCAdded)(int id, const char* name, void* user_data);
@@ -118,6 +119,7 @@ GRCLIB_API void rc_on_private_message_ex(RCHandle handle, RC_OnPrivateMessageEx 
 GRCLIB_API void rc_on_file_received(RCHandle handle, RC_OnFileReceived callback, void* user_data);
 GRCLIB_API void rc_on_weapon_added(RCHandle handle, RC_OnWeaponAdded callback, void* user_data);
 GRCLIB_API void rc_on_weapon_deleted(RCHandle handle, RC_OnWeaponDeleted callback, void* user_data);
+GRCLIB_API void rc_on_weapon_list_received(RCHandle handle, RC_OnWeaponListReceived callback, void* user_data);
 GRCLIB_API void rc_on_class_added(RCHandle handle, RC_OnClassAdded callback, void* user_data);
 GRCLIB_API void rc_on_class_deleted(RCHandle handle, RC_OnClassDeleted callback, void* user_data);
 GRCLIB_API void rc_on_npc_added(RCHandle handle, RC_OnNPCAdded callback, void* user_data);
@@ -190,6 +192,7 @@ GRCLIB_API int rc_request_npc_script(RCHandle handle, int npc_id);
 GRCLIB_API int rc_request_npc_attributes(RCHandle handle, int npc_id);
 GRCLIB_API int rc_request_class_script(RCHandle handle, const char* class_name);
 GRCLIB_API int rc_request_weapon_script(RCHandle handle, const char* weapon_name);
+GRCLIB_API int rc_request_weapon_list(RCHandle handle);
 GRCLIB_API int rc_reset_npc(RCHandle handle, int npc_id);
 GRCLIB_API int rc_warp_npc(RCHandle handle, int npc_id, float x, float y, const char* level);
 GRCLIB_API int rc_get_npc_flags(RCHandle handle, int npc_id);
