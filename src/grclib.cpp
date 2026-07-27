@@ -128,6 +128,17 @@ static std::string readAttrString(const std::vector<uint8_t>& data, size_t& offs
     return value;
 }
 
+static std::string readAttrChest(const std::vector<uint8_t>& data, size_t& offset) {
+    if (offset >= data.size()) return "";
+    int length = decodeAttrByte(data[offset++]);
+    if (length < 2 || offset + (size_t)length > data.size()) return "";
+    const int x = decodeAttrByte(data[offset]);
+    const int y = decodeAttrByte(data[offset + 1]);
+    std::string value = std::to_string(x) + ":" + std::to_string(y) + ":" + std::string(data.begin() + offset + 2, data.begin() + offset + length);
+    offset += length;
+    return value;
+}
+
 static bool isPlayerAttrStringProp(int prop_id) {
     return prop_id == RC_PLPROP_NICKNAME || prop_id == RC_PLPROP_GANI || prop_id == RC_PLPROP_CURCHAT ||
         prop_id == RC_PLPROP_CURLEVEL || prop_id == RC_PLPROP_HORSEGIF || prop_id == RC_PLPROP_ACCOUNTNAME ||
@@ -870,6 +881,7 @@ struct RCConnection {
     RC_OnAccountList on_account_list;
     void* on_account_list_data;
     std::string pending_local_npcs_level;
+    bool pending_level_list = false;
     std::string pending_pm_server_name;
     std::vector<std::string> pending_pm_server_players;
     std::string pending_ban_account;
@@ -1409,7 +1421,7 @@ struct RCConnection {
                         int chest_count = ((decodeAttrByte(packet[parse_offset]) << 7) + decodeAttrByte(packet[parse_offset + 1]));
                         parse_offset += 2;
                         for (int i = 0; i < chest_count && parse_offset < packet.size(); ++i) {
-                            chests.push_back(readAttrString(packet, parse_offset));
+                            chests.push_back(readAttrChest(packet, parse_offset));
                         }
                     }
 
@@ -2038,7 +2050,17 @@ struct RCConnection {
                 break;
             }
             case PLO_NC_LEVELLIST: {
-                emitServerDataPacket("nc_levellist", offset);
+                std::string tokenized(packet.begin() + offset, packet.end());
+                std::string content = grc::gtokenizeReverseString(tokenized);
+                {
+                    std::lock_guard<std::mutex> lock(cache_mutex);
+                    pending_level_list = false;
+                }
+                if (on_server_data) {
+                    pushEvent([this, content]() {
+                        if (on_server_data) on_server_data("nc_levellist", content.c_str(), on_server_data_data);
+                    });
+                }
                 break;
             }
             case PLO_SERVERTEXT: { // 82 - Server text (PM server info, lister, etc)
@@ -2592,6 +2614,20 @@ struct RCConnection {
 
         // NC server INCOMING packets (PLO_NC_)
         switch (packet_id) {
+            case PLO_NC_LEVELLIST: {
+                std::string tokenized(packet.begin() + offset, packet.end());
+                std::string content = grc::gtokenizeReverseString(tokenized);
+                {
+                    std::lock_guard<std::mutex> lock(cache_mutex);
+                    pending_level_list = false;
+                }
+                if (on_server_data) {
+                    pushEvent([this, content]() {
+                        if (on_server_data) on_server_data("nc_levellist", content.c_str(), on_server_data_data);
+                    });
+                }
+                break;
+            }
             case PLO_NC_WEAPONLISTGET: { // 167 - Weapon list
                 clearWeaponCache();
                 int weapon_count = 0;
@@ -2652,12 +2688,21 @@ struct RCConnection {
                     text = grc::gtokenizeReverseString(tokenized);
                 }
                 std::string level;
+                bool level_list = false;
                 {
                     std::lock_guard<std::mutex> lock(cache_mutex);
-                    level = pending_local_npcs_level;
-                    pending_local_npcs_level.clear();
+                    level_list = pending_level_list;
+                    pending_level_list = false;
+                    if (!level_list) {
+                        level = pending_local_npcs_level;
+                        pending_local_npcs_level.clear();
+                    }
                 }
-                if (on_local_npcs) {
+                if (level_list && on_server_data) {
+                    pushEvent([this, text]() {
+                        if (on_server_data) on_server_data("nc_levellist", text.c_str(), on_server_data_data);
+                    });
+                } else if (on_local_npcs) {
                     pushEvent([this, level, text]() {
                         if (on_local_npcs) on_local_npcs(level.c_str(), text.c_str(), on_local_npcs_data);
                     });
@@ -4051,9 +4096,18 @@ int rc_send_nc_packet(RCHandle handle, int packet_id, const char* data, int leng
     if (!handle || !data || length < 0) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (packet_id == PLI_NC_LEVELLISTGET) {
+        std::lock_guard<std::mutex> lock(conn->cache_mutex);
+        conn->pending_level_list = true;
+    }
     std::vector<uint8_t> payload(data, data + length);
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(packet_id, payload);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    if (grc::sendAll(conn->nc_socket, packet.data(), packet.size())) return 1;
+    if (packet_id == PLI_NC_LEVELLISTGET) {
+        std::lock_guard<std::mutex> lock(conn->cache_mutex);
+        conn->pending_level_list = false;
+    }
+    return 0;
 }
 char* rc_gtokenize(const char* text) {
     if (!text) return nullptr;
@@ -4481,7 +4535,16 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     for (const auto& flag : flags) writeAttrString(data, flag);
     std::vector<std::string> chests = jsonGetStringArray(json, "chests");
     data.push_back((uint8_t)(((chests.size() >> 7) & 0xff) + 32)); data.push_back((uint8_t)((chests.size() & 0x7f) + 32));
-    for (const auto& chest : chests) writeAttrString(data, chest);
+    for (const auto& chest : chests) {
+        const size_t first = chest.find(':');
+        const size_t second = first == std::string::npos ? std::string::npos : chest.find(':', first + 1);
+        if (first == std::string::npos || second == std::string::npos) { writeAttrString(data, chest); continue; }
+        const std::string filename = chest.substr(second + 1);
+        data.push_back(grc::writeGByte((int)filename.size() + 2));
+        data.push_back(grc::writeGByte(std::atoi(chest.substr(0, first).c_str())));
+        data.push_back(grc::writeGByte(std::atoi(chest.substr(first + 1, second - first - 1).c_str())));
+        data.insert(data.end(), filename.begin(), filename.end());
+    }
     std::vector<std::string> weapons = jsonGetStringArray(json, "weapons");
     data.push_back(grc::writeGByte((int)weapons.size()));
     for (const auto& weapon : weapons) writeAttrString(data, weapon);
