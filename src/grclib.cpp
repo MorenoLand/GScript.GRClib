@@ -10,6 +10,7 @@
 #include <memory>
 #include <functional>
 #include <map>
+#include <set>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -85,6 +86,13 @@ static bool startsWithText(const std::string& value, const std::string& prefix) 
 static std::string lowerText(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return (char)std::tolower(c); });
     return value;
+}
+
+static std::string fileBrowserFolderKey(std::string value) {
+    std::replace(value.begin(), value.end(), '\\', '/');
+    while (!value.empty() && value.front() == '/') value.erase(value.begin());
+    while (!value.empty() && value.back() == '/') value.pop_back();
+    return lowerText(value);
 }
 
 static std::string protocolTextNamespace() {
@@ -789,6 +797,7 @@ struct RCConnection {
     std::vector<FileBrowserFileCacheEntry> filebrowser_files;
     std::vector<RCFileBrowserEntry> filebrowser_file_view;
     std::string filebrowser_current_folder;
+    std::set<std::string> sync_filebrowser_requests;
     struct FileTransfer {
         std::vector<uint8_t> buffer;
         size_t size;
@@ -796,6 +805,7 @@ struct RCConnection {
     };
     std::map<std::string, FileTransfer> file_transfers;
     std::string pending_file_download;
+    std::set<std::string> sync_file_downloads;
     int pending_npc_attributes_id;
     std::mutex transfer_mutex;
     std::queue<std::pair<std::string, std::function<void()>>> event_queue;
@@ -818,6 +828,8 @@ struct RCConnection {
     void* on_private_message_ex_data;
     RC_OnFileReceived on_file_received;
     void* on_file_received_data;
+    RC_OnFileReceived on_sync_file_received;
+    void* on_sync_file_received_data;
     RC_OnWeaponAdded on_weapon_added;
     void* on_weapon_added_data;
     RC_OnWeaponDeleted on_weapon_deleted;
@@ -856,14 +868,21 @@ struct RCConnection {
     void* on_pm_server_players_data;
     RC_OnFileBrowserFolders on_filebrowser_folders;
     void* on_filebrowser_folders_data;
+    RC_OnFileBrowserFolders on_sync_filebrowser_folders;
+    void* on_sync_filebrowser_folders_data;
+    bool sync_filebrowser_start_pending;
     RC_OnFileBrowserFiles on_filebrowser_files;
     void* on_filebrowser_files_data;
+    RC_OnFileBrowserFiles on_sync_filebrowser_files;
+    void* on_sync_filebrowser_files_data;
     RC_OnFileBrowserMessage on_filebrowser_message;
     void* on_filebrowser_message_data;
     RC_OnScriptReceived on_script_received;
     void* on_script_received_data;
     RC_OnServerData on_server_data;
     void* on_server_data_data;
+    RC_OnServerData on_sync_server_data;
+    void* on_sync_server_data_data;
     RC_OnPlayerRights on_player_rights;
     void* on_player_rights_data;
     RC_OnPlayerTextData on_player_text_data;
@@ -893,7 +912,7 @@ struct RCConnection {
     RCConnection() : game_socket(INVALID_SOCKET), nc_socket(INVALID_SOCKET), running(false), connected(false), authenticated(false), nc_connected(false), nc_authenticated(false), is_new_protocol(false), npcserver_player_id(0),
         on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr),
         on_player_joined(nullptr), on_player_joined_data(nullptr), on_player_left(nullptr), on_player_left_data(nullptr),
-        on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr),
+        on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr), on_sync_file_received(nullptr), on_sync_file_received_data(nullptr),
         on_weapon_added(nullptr), on_weapon_added_data(nullptr), on_weapon_deleted(nullptr), on_weapon_deleted_data(nullptr), on_weapon_list_received(nullptr), on_weapon_list_received_data(nullptr),
         on_class_added(nullptr), on_class_added_data(nullptr), on_class_deleted(nullptr), on_class_deleted_data(nullptr),
         on_npc_added(nullptr), on_npc_added_data(nullptr), on_npc_deleted(nullptr), on_npc_deleted_data(nullptr),
@@ -902,9 +921,9 @@ struct RCConnection {
         on_max_upload_file_size(nullptr), on_max_upload_file_size_data(nullptr), on_command_response(nullptr), on_command_response_data(nullptr),
         on_raw_packet(nullptr), on_raw_packet_data(nullptr), on_pm_servers_updated(nullptr), on_pm_servers_updated_data(nullptr), on_pm_guilds_updated(nullptr), on_pm_guilds_updated_data(nullptr),
         on_npc_flags(nullptr), on_npc_flags_data(nullptr), on_pm_server_players(nullptr), on_pm_server_players_data(nullptr),
-        on_filebrowser_folders(nullptr), on_filebrowser_folders_data(nullptr),
-        on_filebrowser_files(nullptr), on_filebrowser_files_data(nullptr), on_filebrowser_message(nullptr), on_filebrowser_message_data(nullptr),
-        on_script_received(nullptr), on_script_received_data(nullptr), on_server_data(nullptr), on_server_data_data(nullptr),
+        on_filebrowser_folders(nullptr), on_filebrowser_folders_data(nullptr), on_sync_filebrowser_folders(nullptr), on_sync_filebrowser_folders_data(nullptr), sync_filebrowser_start_pending(false),
+        on_filebrowser_files(nullptr), on_filebrowser_files_data(nullptr), on_sync_filebrowser_files(nullptr), on_sync_filebrowser_files_data(nullptr), on_filebrowser_message(nullptr), on_filebrowser_message_data(nullptr),
+        on_script_received(nullptr), on_script_received_data(nullptr), on_server_data(nullptr), on_server_data_data(nullptr), on_sync_server_data(nullptr), on_sync_server_data_data(nullptr),
         on_player_rights(nullptr), on_player_rights_data(nullptr), on_player_text_data(nullptr), on_player_text_data_data(nullptr),
         on_player_attributes(nullptr), on_player_attributes_data(nullptr), on_local_npcs(nullptr), on_local_npcs_data(nullptr),
         on_irc_message(nullptr), on_irc_message_data(nullptr), on_ban_data(nullptr), on_ban_data_data(nullptr),
@@ -916,6 +935,30 @@ struct RCConnection {
     std::string getError() {
         std::lock_guard<std::mutex> lock(error_mutex);
         return last_error;
+    }
+    void dispatchFileReceived(const std::string& path, const std::string& content, const std::string& label) {
+        bool sync_only = false;
+        auto endsWith = [](const std::string& value, const std::string& suffix) { return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0; };
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            for (auto iterator = sync_file_downloads.begin(); iterator != sync_file_downloads.end(); ++iterator) {
+                const std::string& requested = *iterator;
+                const bool matches = requested == path || (requested.size() > path.size() && endsWith(requested, "/" + path)) || (path.size() > requested.size() && endsWith(path, "/" + requested));
+                if (!matches) continue;
+                sync_file_downloads.erase(iterator);
+                sync_only = true;
+                break;
+            }
+        }
+        if (sync_only && on_sync_file_received) {
+            pushEvent([this, path, content]() {
+                on_sync_file_received(path.c_str(), content.empty() ? "" : content.data(), static_cast<int>(content.size()), on_sync_file_received_data);
+            }, "sync_file_received:" + label + ":" + path);
+        } else if (on_file_received) {
+            pushEvent([this, path, content]() {
+                on_file_received(path.c_str(), content.empty() ? "" : content.data(), static_cast<int>(content.size()), on_file_received_data);
+            }, "file_received:" + label + ":" + path);
+        }
     }
     void pushEvent(std::function<void()> callback, const std::string& label = "event") {
         std::lock_guard<std::mutex> lock(event_mutex);
@@ -1069,11 +1112,7 @@ struct RCConnection {
                         std::string msg = "File complete: " + transfer_key;
                         pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:file_complete");
                     }
-                    if (on_file_received) {
-                        pushEvent([this, transfer_key, content]() {
-                            on_file_received(transfer_key.c_str(), content.c_str(), content.length(), on_file_received_data);
-                        }, "file_received:file_complete:" + transfer_key);
-                    }
+                    dispatchFileReceived(transfer_key, content, "file_complete");
                 }
                 break;
             }
@@ -1502,6 +1541,7 @@ struct RCConnection {
                         on_server_data("options", content.c_str(), on_server_data_data);
                     });
                 }
+                if (on_sync_server_data) pushEvent([this, content]() { on_sync_server_data("options", content.c_str(), on_sync_server_data_data); });
                 if (on_raw_packet) {
                     std::vector<uint8_t> payload(packet.begin() + offset, packet.end());
                     pushEvent([this, packet_id, payload]() {
@@ -1522,6 +1562,7 @@ struct RCConnection {
                         on_server_data("folder_config", content.c_str(), on_server_data_data);
                     });
                 }
+                if (on_sync_server_data) pushEvent([this, content]() { on_sync_server_data("folder_config", content.c_str(), on_sync_server_data_data); });
                 if (on_raw_packet) {
                     std::vector<uint8_t> payload(packet.begin() + offset, packet.end());
                     pushEvent([this, packet_id, payload]() {
@@ -1654,6 +1695,7 @@ struct RCConnection {
                             on_server_data("flags", content.c_str(), on_server_data_data);
                         });
                     }
+                    if (on_sync_server_data) pushEvent([this, content]() { on_sync_server_data("flags", content.c_str(), on_sync_server_data_data); });
                     if (on_raw_packet) {
                         std::vector<uint8_t> payload(packet.begin() + 1, packet.end());
                         pushEvent([this, packet_id, payload]() {
@@ -1722,20 +1764,32 @@ struct RCConnection {
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     filebrowser_folders = folders;
                 }
-                if (on_filebrowser_folders) {
-                    pushEvent([this, count]() {
-                        on_filebrowser_folders(count, on_filebrowser_folders_data);
+                RC_OnFileBrowserFolders folder_callback = sync_filebrowser_start_pending ? on_sync_filebrowser_folders : on_filebrowser_folders;
+                void* folder_callback_data = sync_filebrowser_start_pending ? on_sync_filebrowser_folders_data : on_filebrowser_folders_data;
+                sync_filebrowser_start_pending = false;
+                if (folder_callback) {
+                    pushEvent([folder_callback, folder_callback_data, count]() {
+                        folder_callback(count, folder_callback_data);
                     }, "filebrowser_folders");
                 }
                 break;
             }
             case PLO_RC_FILEBROWSER_DIR: { // 66 - File listing response (with compression/encryption!)
                 if (packet.size() == offset || (packet.size() == offset + 1 && packet[offset] == 0x20)) {
+                    std::string sync_folder;
                     {
                         std::lock_guard<std::mutex> lock(cache_mutex);
                         filebrowser_files.clear();
+                        if (!sync_filebrowser_requests.empty()) {
+                            sync_folder = *sync_filebrowser_requests.begin();
+                            sync_filebrowser_requests.erase(sync_filebrowser_requests.begin());
+                        }
                     }
-                    if (on_filebrowser_files) {
+                    if (!sync_folder.empty() && on_sync_filebrowser_files) {
+                        pushEvent([this, sync_folder]() {
+                            on_sync_filebrowser_files(sync_folder.c_str(), 0, on_sync_filebrowser_files_data);
+                        }, "sync_filebrowser_files:empty:" + sync_folder);
+                    } else if (on_filebrowser_files) {
                         pushEvent([this]() {
                             on_filebrowser_files("", 0, on_filebrowser_files_data);
                         }, "filebrowser_files:empty");
@@ -1921,12 +1975,18 @@ struct RCConnection {
                 }
 
                 int count = static_cast<int>(files.size());
+                bool sync_only = false;
                 {
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     filebrowser_current_folder = folder_path;
                     filebrowser_files = files;
+                    sync_only = sync_filebrowser_requests.erase(fileBrowserFolderKey(folder_path)) != 0;
                 }
-                if (on_filebrowser_files) {
+                if (sync_only && on_sync_filebrowser_files) {
+                    pushEvent([this, folder_path, count]() {
+                        on_sync_filebrowser_files(folder_path.c_str(), count, on_sync_filebrowser_files_data);
+                    }, "sync_filebrowser_files:" + folder_path);
+                } else if (on_filebrowser_files) {
                     pushEvent([this, folder_path, count]() {
                         on_filebrowser_files(folder_path.c_str(), count, on_filebrowser_files_data);
                     }, "filebrowser_files:" + folder_path);
@@ -1986,11 +2046,7 @@ struct RCConnection {
                         std::string msg = "Bigfile transfer ended: " + filename;
                         pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:largefile_end");
                     }
-                    if (on_file_received) {
-                        pushEvent([this, transfer_key, content]() {
-                            on_file_received(transfer_key.c_str(), content.c_str(), content.length(), on_file_received_data);
-                        }, "file_received:largefile_end:" + transfer_key);
-                    }
+                    dispatchFileReceived(transfer_key, content, "largefile_end");
                 }
                 break;
             }
@@ -2354,12 +2410,7 @@ struct RCConnection {
                                 completeTransferIfReady(transfer_key, chunk_received, chunk_total, "file_chunk_size_complete");
                             } else {
                                 // Single-packet file download
-                                if (on_file_received) {
-                                    std::string content_str((char*)content.data(), content.size());
-                                    pushEvent([this, filename, content_str]() {
-                                        on_file_received(filename.c_str(), content_str.c_str(), content_str.length(), on_file_received_data);
-                                    }, "file_received:single_packet:" + filename);
-                                }
+                                dispatchFileReceived(filename, std::string(reinterpret_cast<const char*>(content.data()), content.size()), "single_packet");
                             }
                         }
                     }
@@ -2471,6 +2522,18 @@ struct RCConnection {
         }
         return 0;
     }
+    bool isKnownEmptyDownload(const std::string& path) {
+        if (path.empty()) return false;
+        size_t slash = path.find_last_of("/\\");
+        std::string basename = slash == std::string::npos ? path : path.substr(slash + 1);
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        for (const auto& entry : filebrowser_files) {
+            if (entry.is_directory || entry.size != 0) continue;
+            if (entry.path == path || entry.path == basename) return true;
+            if (!filebrowser_current_folder.empty() && filebrowser_current_folder + entry.path == path) return true;
+        }
+        return false;
+    }
     bool emitPendingFilePayload(const std::string& path, const std::vector<uint8_t>& content, const char* trace_label) {
         if (path.empty() || content.empty()) return false;
         {
@@ -2482,12 +2545,7 @@ struct RCConnection {
             std::string msg = std::string("File downloaded: ") + path;
             pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:pending_payload_done");
         }
-        if (on_file_received) {
-            std::string content_str(reinterpret_cast<const char*>(content.data()), content.size());
-            pushEvent([this, path, content_str]() {
-                on_file_received(path.c_str(), content_str.c_str(), content_str.length(), on_file_received_data);
-            }, std::string("file_received:") + trace_label + ":" + path);
-        }
+        dispatchFileReceived(path, std::string(reinterpret_cast<const char*>(content.data()), content.size()), trace_label);
         return true;
     }
     bool completeTransferIfReady(const std::string& path, size_t received, size_t total, const char* trace_label) {
@@ -3284,6 +3342,12 @@ void rc_on_weapon_deleted(RCHandle handle, RC_OnWeaponDeleted callback, void* us
     conn->on_weapon_deleted = callback;
     conn->on_weapon_deleted_data = user_data;
 }
+void rc_on_sync_file_received(RCHandle handle, RC_OnFileReceived callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_sync_file_received = callback;
+    conn->on_sync_file_received_data = user_data;
+}
 void rc_on_weapon_list_received(RCHandle handle, RC_OnWeaponListReceived callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
@@ -3420,6 +3484,24 @@ void rc_on_server_data(RCHandle handle, RC_OnServerData callback, void* user_dat
         conn->pushEvent([callback, user_data, type = std::move(event.first), content = std::move(event.second)]() { callback(type.c_str(), content.c_str(), user_data); });
     }
     conn->pending_server_data.clear();
+}
+void rc_on_sync_server_data(RCHandle handle, RC_OnServerData callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_sync_server_data = callback;
+    conn->on_sync_server_data_data = user_data;
+}
+void rc_on_sync_filebrowser_folders(RCHandle handle, RC_OnFileBrowserFolders callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_sync_filebrowser_folders = callback;
+    conn->on_sync_filebrowser_folders_data = user_data;
+}
+void rc_on_sync_filebrowser_files(RCHandle handle, RC_OnFileBrowserFiles callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->on_sync_filebrowser_files = callback;
+    conn->on_sync_filebrowser_files_data = user_data;
 }
 void rc_on_player_rights(RCHandle handle, RC_OnPlayerRights callback, void* user_data) {
     if (!handle) return;
@@ -4192,6 +4274,28 @@ int rc_filebrowser_cd(RCHandle handle, const char* folder_path) {
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_CD, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
+int rc_sync_filebrowser_start(RCHandle handle) {
+    if (!handle) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    conn->sync_filebrowser_start_pending = true;
+    const int result = rc_filebrowser_start(handle);
+    if (!result) conn->sync_filebrowser_start_pending = false;
+    return result;
+}
+int rc_sync_filebrowser_cd(RCHandle handle, const char* folder_path) {
+    if (!handle || !folder_path) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    {
+        std::lock_guard<std::mutex> lock(conn->cache_mutex);
+        conn->sync_filebrowser_requests.insert(fileBrowserFolderKey(folder_path));
+    }
+    if (rc_filebrowser_cd(handle, folder_path)) return 1;
+    {
+        std::lock_guard<std::mutex> lock(conn->cache_mutex);
+        conn->sync_filebrowser_requests.erase(fileBrowserFolderKey(folder_path));
+    }
+    return 0;
+}
 int rc_filebrowser_download(RCHandle handle, const char* file_path) {
     if (!handle || !file_path) return 0;
     RCConnection* conn = (RCConnection*)handle;
@@ -4201,10 +4305,43 @@ int rc_filebrowser_download(RCHandle handle, const char* file_path) {
         conn->file_transfers.clear();
         conn->pending_file_download = file_path;
     }
+    if (conn->isKnownEmptyDownload(file_path)) {
+        {
+            std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+            conn->pending_file_download.clear();
+        }
+        conn->dispatchFileReceived(file_path, "", "known_empty");
+        return 1;
+    }
     std::vector<uint8_t> data(file_path, file_path + strlen(file_path));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_DOWN, data);
     int result = grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
     return result;
+}
+int rc_sync_filebrowser_download(RCHandle handle, const char* file_path) {
+    if (!handle || !file_path) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    {
+        std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+        conn->sync_file_downloads.insert(file_path);
+    }
+    if (rc_filebrowser_download(handle, file_path)) return 1;
+    {
+        std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+        conn->sync_file_downloads.erase(file_path);
+    }
+    return 0;
+}
+int rc_filebrowser_transfer_progress(RCHandle handle, const char* file_path, long long* received_out, long long* total_out) {
+    if (!handle || !file_path || !received_out || !total_out) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+    auto iterator = conn->file_transfers.find(file_path);
+    if (iterator == conn->file_transfers.end() && conn->pending_file_download == file_path) iterator = conn->file_transfers.find(conn->pending_file_download);
+    if (iterator == conn->file_transfers.end()) return 0;
+    *received_out = static_cast<long long>(iterator->second.received);
+    *total_out = static_cast<long long>(iterator->second.size);
+    return iterator->second.size > 0 ? 1 : 0;
 }
 int rc_filebrowser_delete(RCHandle handle, const char* file_path) {
     if (!handle || !file_path) return 0;

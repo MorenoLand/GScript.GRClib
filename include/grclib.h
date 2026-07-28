@@ -117,6 +117,7 @@ GRCLIB_API void rc_on_message(RCHandle handle, RC_OnMessage callback, void* user
 GRCLIB_API void rc_on_private_message(RCHandle handle, RC_OnPrivateMessage callback, void* user_data);
 GRCLIB_API void rc_on_private_message_ex(RCHandle handle, RC_OnPrivateMessageEx callback, void* user_data);
 GRCLIB_API void rc_on_file_received(RCHandle handle, RC_OnFileReceived callback, void* user_data);
+GRCLIB_API void rc_on_sync_file_received(RCHandle handle, RC_OnFileReceived callback, void* user_data);
 GRCLIB_API void rc_on_weapon_added(RCHandle handle, RC_OnWeaponAdded callback, void* user_data);
 GRCLIB_API void rc_on_weapon_deleted(RCHandle handle, RC_OnWeaponDeleted callback, void* user_data);
 GRCLIB_API void rc_on_weapon_list_received(RCHandle handle, RC_OnWeaponListReceived callback, void* user_data);
@@ -136,10 +137,13 @@ GRCLIB_API void rc_on_pm_guilds_updated(RCHandle handle, RC_OnPMGuildsUpdated ca
 GRCLIB_API void rc_on_npc_flags(RCHandle handle, RC_OnNPCFlags callback, void* user_data);
 GRCLIB_API void rc_on_pm_server_players(RCHandle handle, RC_OnPMServerPlayers callback, void* user_data);
 GRCLIB_API void rc_on_filebrowser_folders(RCHandle handle, RC_OnFileBrowserFolders callback, void* user_data);
+GRCLIB_API void rc_on_sync_filebrowser_folders(RCHandle handle, RC_OnFileBrowserFolders callback, void* user_data);
 GRCLIB_API void rc_on_filebrowser_files(RCHandle handle, RC_OnFileBrowserFiles callback, void* user_data);
+GRCLIB_API void rc_on_sync_filebrowser_files(RCHandle handle, RC_OnFileBrowserFiles callback, void* user_data);
 GRCLIB_API void rc_on_filebrowser_message(RCHandle handle, RC_OnFileBrowserMessage callback, void* user_data);
 GRCLIB_API void rc_on_script_received(RCHandle handle, RC_OnScriptReceived callback, void* user_data);
 GRCLIB_API void rc_on_server_data(RCHandle handle, RC_OnServerData callback, void* user_data);
+GRCLIB_API void rc_on_sync_server_data(RCHandle handle, RC_OnServerData callback, void* user_data);
 GRCLIB_API void rc_on_player_rights(RCHandle handle, RC_OnPlayerRights callback, void* user_data);
 GRCLIB_API void rc_on_player_text_data(RCHandle handle, RC_OnPlayerTextData callback, void* user_data);
 GRCLIB_API void rc_on_player_attributes(RCHandle handle, RC_OnPlayerAttributes callback, void* user_data);
@@ -257,8 +261,12 @@ GRCLIB_API int rc_read_gint5(const char* data, int length, int offset, int* valu
 GRCLIB_API char* rc_read_length_string(const char* data, int length, int offset, int* offset_out);
 GRCLIB_API char* rc_read_comma_text(const char* data, int length, int offset, int read_length);
 GRCLIB_API int rc_filebrowser_start(RCHandle handle);
+GRCLIB_API int rc_sync_filebrowser_start(RCHandle handle);
 GRCLIB_API int rc_filebrowser_cd(RCHandle handle, const char* folder_path);
+GRCLIB_API int rc_sync_filebrowser_cd(RCHandle handle, const char* folder_path);
 GRCLIB_API int rc_filebrowser_download(RCHandle handle, const char* file_path);
+GRCLIB_API int rc_sync_filebrowser_download(RCHandle handle, const char* file_path);
+GRCLIB_API int rc_filebrowser_transfer_progress(RCHandle handle, const char* file_path, long long* received_out, long long* total_out);
 GRCLIB_API int rc_filebrowser_delete(RCHandle handle, const char* file_path);
 GRCLIB_API int rc_filebrowser_rename(RCHandle handle, const char* old_path, const char* new_path);
 GRCLIB_API int rc_filebrowser_move(RCHandle handle, const char* destination_folder, const char* file_path);
