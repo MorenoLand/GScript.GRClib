@@ -756,6 +756,7 @@ static const char* incomingRcPacketName(int packet_id) {
 }
 
 struct RCConnection {
+    std::recursive_mutex api_mutex;
     std::string listserver_host;
     int listserver_port;
     std::string game_host;
@@ -3209,6 +3210,7 @@ int rc_has_nc_server(RCHandle handle) {
 int rc_connect_to_nc_server(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (conn->nc_connected && conn->nc_socket != INVALID_SOCKET) return 1;
     conn->nc_authenticated = false;
     conn->nc_connected = false;
@@ -3808,6 +3810,7 @@ int rc_disconnect_player(RCHandle handle, int player_id, const char* reason) {
 int rc_add_weapon(RCHandle handle, const char* name, const char* image, const char* script) {
     if (!handle || !name || !image || !script) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     data.push_back(grc::writeGByte(strlen(name)));
@@ -3825,6 +3828,7 @@ int rc_add_weapon(RCHandle handle, const char* name, const char* image, const ch
 int rc_delete_weapon(RCHandle handle, const char* name) {
     if (!handle || !name) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data(name, name + strlen(name));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONDELETE, data);
@@ -3833,6 +3837,7 @@ int rc_delete_weapon(RCHandle handle, const char* name) {
 int rc_update_weapon(RCHandle handle, const char* name, const char* image, const char* script) {
     if (!handle || !name || !image || !script) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     data.push_back(grc::writeGByte(strlen(name)));
@@ -3850,6 +3855,7 @@ int rc_update_weapon(RCHandle handle, const char* name, const char* image, const
 int rc_add_class(RCHandle handle, const char* name, const char* script) {
     if (!handle || !name || !script) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     data.push_back(grc::writeGByte(strlen(name)));
@@ -3862,6 +3868,7 @@ int rc_add_class(RCHandle handle, const char* name, const char* script) {
 int rc_delete_class(RCHandle handle, const char* name) {
     if (!handle || !name) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data(name, name + strlen(name));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSDELETE, data);
@@ -3870,6 +3877,7 @@ int rc_delete_class(RCHandle handle, const char* name) {
 int rc_update_class(RCHandle handle, const char* name, const char* script) {
     if (!handle || !name || !script) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     data.push_back(grc::writeGByte(strlen(name)));
@@ -3882,6 +3890,7 @@ int rc_update_class(RCHandle handle, const char* name, const char* script) {
 int rc_delete_npc(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     grc::writeGInt3(data, npc_id);
@@ -3891,6 +3900,7 @@ int rc_delete_npc(RCHandle handle, int npc_id) {
 int rc_update_npc(RCHandle handle, int npc_id, const char* script) {
     if (!handle || !script) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data;
     grc::writeGInt3(data, npc_id);
@@ -3912,6 +3922,7 @@ int rc_create_npc_on_server(RCHandle handle, const char* name, int npc_id, const
 int rc_disconnect_nc(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected) return 0;
     if (conn->nc_socket != INVALID_SOCKET) {
         closesocket(conn->nc_socket);
@@ -3984,6 +3995,7 @@ int rc_send_toall_message(RCHandle handle, const char* message) {
 int rc_request_npc_script(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
@@ -3995,6 +4007,7 @@ int rc_request_npc_script(RCHandle handle, int npc_id) {
 int rc_request_npc_attributes(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
     conn->pending_npc_attributes_id = npc_id;
     int high = ((npc_id >> 14) & 0xFF) + 32;
@@ -4007,6 +4020,7 @@ int rc_request_npc_attributes(RCHandle handle, int npc_id) {
 int rc_request_class_script(RCHandle handle, const char* class_name) {
     if (!handle || !class_name) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
     std::vector<uint8_t> data(class_name, class_name + strlen(class_name));
     data.push_back('\n');
@@ -4016,6 +4030,7 @@ int rc_request_class_script(RCHandle handle, const char* class_name) {
 int rc_request_weapon_list(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
     return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
@@ -4023,6 +4038,7 @@ int rc_request_weapon_list(RCHandle handle) {
 int rc_request_weapon_script(RCHandle handle, const char* weapon_name) {
     if (!handle || !weapon_name) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
     std::vector<uint8_t> data(weapon_name, weapon_name + strlen(weapon_name));
     data.push_back('\n');
@@ -4177,6 +4193,7 @@ int rc_reset_player(RCHandle handle, const char* account) {
 int rc_send_nc_packet(RCHandle handle, int packet_id, const char* data, int length) {
     if (!handle || !data || length < 0) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
     if (packet_id == PLI_NC_LEVELLISTGET) {
         std::lock_guard<std::mutex> lock(conn->cache_mutex);
@@ -5254,6 +5271,7 @@ void rc_disconnect(RCHandle handle) {
 void rc_process_events(RCHandle handle) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     std::queue<std::pair<std::string, std::function<void()>>> events;
     {
         std::lock_guard<std::mutex> lock(conn->event_mutex);
