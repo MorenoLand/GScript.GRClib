@@ -4122,6 +4122,16 @@ int rc_request_player_attrs(RCHandle handle, const char* account) {
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERPROPSGET3, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
+int rc_request_player_attrs_by_id(RCHandle handle, int player_id) {
+    if (!handle || player_id < 0) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    std::vector<uint8_t> data;
+    const int coded_id = player_id > 0x6FFF ? 0x6FFF : player_id;
+    grc::writeGShort(data, coded_id);
+    std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERPROPSGET2, data);
+    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+}
 int rc_request_player_account(RCHandle handle, const char* account) {
     if (!handle || !account) return 0;
     RCConnection* conn = (RCConnection*)handle;

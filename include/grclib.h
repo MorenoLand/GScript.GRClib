@@ -204,6 +204,7 @@ GRCLIB_API int rc_set_npc_flags(RCHandle handle, int npc_id, const char* flags);
 GRCLIB_API int rc_send_nc_packet(RCHandle handle, int packet_id, const char* data, int length);
 GRCLIB_API int rc_request_player_rights(RCHandle handle, const char* account);
 GRCLIB_API int rc_request_player_attrs(RCHandle handle, const char* account);
+GRCLIB_API int rc_request_player_attrs_by_id(RCHandle handle, int player_id);
 GRCLIB_API int rc_request_player_account(RCHandle handle, const char* account);
 GRCLIB_API int rc_request_account_list(RCHandle handle, const char* account_filter, const char* conditions);
 GRCLIB_API int rc_request_player_comments(RCHandle handle, const char* account);
