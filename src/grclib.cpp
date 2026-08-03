@@ -100,6 +100,12 @@ static std::string protocolTextNamespace() {
     return std::string((const char*)bytes, sizeof(bytes));
 }
 
+static std::string normalizeProtocolText(std::string value) {
+    if (value.find('\x01') == std::string::npos) return value;
+    std::replace(value.begin(), value.end(), '\x01', '\n');
+    return value;
+}
+
 static std::string joinText(const std::vector<std::string>& values, size_t start, const std::string& separator) {
     std::string out;
     for (size_t i = start; i < values.size(); ++i) {
@@ -2122,6 +2128,7 @@ struct RCConnection {
             }
             case PLO_SERVERTEXT: { // 82 - Server text (PM server info, lister, etc)
                 std::string message(packet.begin() + offset, packet.end());
+                message = normalizeProtocolText(std::move(message));
                 std::string untokenized = grc::gtokenizeReverseString(message);
                 std::vector<std::string> parts;
                 size_t start = 0;
