@@ -2808,6 +2808,7 @@ struct RCConnection {
                     if (offset >= packet.size()) break;
                     int image_len = grc::decodeGByte(packet[offset++]);
                     if (offset + image_len > packet.size()) break;
+                    std::string image(packet.begin() + offset, packet.begin() + offset + image_len);
                     offset += image_len;
                     std::vector<uint8_t> encoded_script(packet.begin() + offset, packet.end());
                     std::string script;
@@ -2818,6 +2819,8 @@ struct RCConnection {
                     std::lock_guard<std::mutex> lock(cache_mutex);
                     for (auto& weapon : weapon_cache) {
                         if (strcmp(weapon.name, weapon_name.c_str()) == 0) {
+                            if (weapon.image) free(weapon.image);
+                            weapon.image = grcStrdup(image.c_str());
                             if (weapon.script) free(weapon.script);
                             weapon.script = grcStrdup(script.c_str());
                             break;
