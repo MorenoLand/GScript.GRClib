@@ -63,6 +63,7 @@ typedef struct {
 } RCFileBrowserEntry;
 typedef void (*RC_OnConnected)(void* user_data);
 typedef void (*RC_OnDisconnected)(const char* reason, void* user_data);
+typedef void (*RC_OnDisconnectedEx)(RCHandle handle, const char* reason, void* user_data);
 typedef void (*RC_OnPlayerJoined)(const char* account, int player_id, void* user_data);
 typedef void (*RC_OnPlayerLeft)(const char* account, int player_id, void* user_data);
 typedef void (*RC_OnMessage)(const char* message, void* user_data);
@@ -111,6 +112,7 @@ GRCLIB_API int rc_is_nc_authenticated(RCHandle handle);
 GRCLIB_API int rc_has_nc_server(RCHandle handle);
 GRCLIB_API void rc_on_connected(RCHandle handle, RC_OnConnected callback, void* user_data);
 GRCLIB_API void rc_on_disconnected(RCHandle handle, RC_OnDisconnected callback, void* user_data);
+GRCLIB_API void rc_on_disconnected_ex(RCHandle handle, RC_OnDisconnectedEx callback, void* user_data);
 GRCLIB_API void rc_on_player_joined(RCHandle handle, RC_OnPlayerJoined callback, void* user_data);
 GRCLIB_API void rc_on_player_left(RCHandle handle, RC_OnPlayerLeft callback, void* user_data);
 GRCLIB_API void rc_on_message(RCHandle handle, RC_OnMessage callback, void* user_data);

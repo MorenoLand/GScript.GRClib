@@ -1,4 +1,4 @@
-build/
+build*/
 bin/
 backups/
 __pycache__/

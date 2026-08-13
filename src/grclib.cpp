@@ -22,6 +22,16 @@
 struct RCConnection;
 static int sendListerText(RCConnection* conn, const std::string& command, const std::string& value, int packet_id);
 
+static void interruptSocket(SOCKET socket) {
+    if (socket == INVALID_SOCKET) return;
+#ifdef _WIN32
+    shutdown(socket, SD_BOTH);
+#else
+    shutdown(socket, SHUT_RDWR);
+#endif
+    closesocket(socket);
+}
+
 static char* grcStrdup(const char* text) {
     if (!text) text = "";
     size_t length = strlen(text) + 1;
@@ -823,6 +833,9 @@ struct RCConnection {
     void* on_connected_data;
     RC_OnDisconnected on_disconnected;
     void* on_disconnected_data;
+    RC_OnDisconnectedEx on_disconnected_ex;
+    void* on_disconnected_ex_data;
+    std::atomic<bool> disconnect_event_queued;
     RC_OnPlayerJoined on_player_joined;
     void* on_player_joined_data;
     RC_OnPlayerLeft on_player_left;
@@ -917,7 +930,7 @@ struct RCConnection {
     std::string folder_config;
     long long max_upload_file_size;
     RCConnection() : game_socket(INVALID_SOCKET), nc_socket(INVALID_SOCKET), running(false), connected(false), authenticated(false), nc_connected(false), nc_authenticated(false), is_new_protocol(false), npcserver_player_id(0),
-        on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr),
+        on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr), on_disconnected_ex(nullptr), on_disconnected_ex_data(nullptr), disconnect_event_queued(false),
         on_player_joined(nullptr), on_player_joined_data(nullptr), on_player_left(nullptr), on_player_left_data(nullptr),
         on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr), on_sync_file_received(nullptr), on_sync_file_received_data(nullptr),
         on_weapon_added(nullptr), on_weapon_added_data(nullptr), on_weapon_deleted(nullptr), on_weapon_deleted_data(nullptr), on_weapon_list_received(nullptr), on_weapon_list_received_data(nullptr),
@@ -971,6 +984,26 @@ struct RCConnection {
         std::lock_guard<std::mutex> lock(event_mutex);
         event_queue.push(std::make_pair(label, callback));
     }
+    void queueDisconnectedEvent(std::string reason) {
+        RC_OnDisconnected callback = nullptr;
+        void* callbackData = nullptr;
+        RC_OnDisconnectedEx callbackEx = nullptr;
+        void* callbackExData = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(callback_mutex);
+            callback = on_disconnected;
+            callbackData = on_disconnected_data;
+            callbackEx = on_disconnected_ex;
+            callbackExData = on_disconnected_ex_data;
+        }
+        if (callback == nullptr && callbackEx == nullptr) return;
+        bool expected = false;
+        if (!disconnect_event_queued.compare_exchange_strong(expected, true)) return;
+        pushEvent([this, callback, callbackData, callbackEx, callbackExData, reason = std::move(reason)]() {
+            if (callbackEx != nullptr) callbackEx(reinterpret_cast<RCHandle>(this), reason.c_str(), callbackExData);
+            else if (callback != nullptr) callback(reason.c_str(), callbackData);
+        }, "disconnected");
+    }
     void emitMessage(std::string message) {
         std::lock_guard<std::mutex> lock(callback_mutex);
         if (!on_message) {
@@ -1008,19 +1041,28 @@ struct RCConnection {
     void updateCachedPlayerProp(int player_id, const PlayerPropValue& prop) {
         if (prop.name != "account" && prop.name != "nick" && prop.name != "level") return;
         std::lock_guard<std::mutex> lock(cache_mutex);
-        for (auto& player : player_cache) {
-            if (player.id != player_id) continue;
-            if (prop.name == "account") {
-                if (player.account) free(player.account);
-                player.account = grcStrdup(prop.value.c_str());
-            } else if (prop.name == "nick") {
-                if (player.nick) free(player.nick);
-                player.nick = grcStrdup(prop.value.c_str());
-            } else if (prop.name == "level") {
-                if (player.level) free(player.level);
-                player.level = prop.value.empty() ? nullptr : grcStrdup(prop.value.c_str());
+        RCPlayer* player = nullptr;
+        for (auto& cached : player_cache) {
+            if (cached.id == player_id) {
+                player = &cached;
+                break;
             }
-            return;
+        }
+        if (player == nullptr) {
+            RCPlayer placeholder{};
+            placeholder.id = player_id;
+            player_cache.push_back(placeholder);
+            player = &player_cache.back();
+        }
+        if (prop.name == "account") {
+            if (player->account) free(player->account);
+            player->account = grcStrdup(prop.value.c_str());
+        } else if (prop.name == "nick") {
+            if (player->nick) free(player->nick);
+            player->nick = grcStrdup(prop.value.c_str());
+        } else if (prop.name == "level") {
+            if (player->level) free(player->level);
+            player->level = prop.value.empty() ? nullptr : grcStrdup(prop.value.c_str());
         }
     }
     void emitPlayerPropChanged(int player_id, const PlayerPropValue& prop) {
@@ -1060,11 +1102,7 @@ struct RCConnection {
             }
             case PLO_DISCMESSAGE: { // 16 - Disconnect message
                 std::string disconnect_msg(packet.begin() + offset, packet.end());
-                if (on_disconnected) {
-                    pushEvent([this, disconnect_msg]() {
-                        on_disconnected(disconnect_msg.c_str(), on_disconnected_data);
-                    });
-                }
+                queueDisconnectedEvent(std::move(disconnect_msg));
                 running = false;
                 break;
             }
@@ -1260,12 +1298,19 @@ struct RCConnection {
                 if (offset + 2 <= packet.size()) {
                     int player_id = grc::decodeGShort(packet.data() + offset);
                     offset += 2;
+                    const size_t property_offset = offset;
                     while (offset < packet.size()) {
                         int prop_id = grc::decodeGByte(packet[offset++]);
                         PlayerPropValue prop;
                         if (!readPlayerPropValue(packet, offset, prop_id, prop)) break;
                         updateCachedPlayerProp(player_id, prop);
                         emitPlayerPropChanged(player_id, prop);
+                    }
+                    if (on_player_properties_changed && property_offset < packet.size()) {
+                        std::string properties(reinterpret_cast<const char*>(packet.data() + property_offset), packet.size() - property_offset);
+                        pushEvent([this, player_id, properties]() {
+                            on_player_properties_changed(player_id, properties.c_str(), on_player_properties_changed_data);
+                        });
                     }
                 }
                 break;
@@ -2220,7 +2265,7 @@ struct RCConnection {
                             });
                         } else if ((command == "privmsg" || command == "notice") && parts.size() >= 6) {
                             std::string source = parts[3], channel = parts[4], message = parts[5];
-                            std::string line = (command == "notice") ? ("* " + source + ": " + message) : ("<" + source + "> " + message);
+                            std::string line = (command == "notice") ? ("* " + source + ": " + message) : (source.empty() ? message : ("<" + source + "> " + message));
                             if (on_irc_message) pushEvent([this, channel, line]() {
                                 on_irc_message(channel.c_str(), line.c_str(), on_irc_message_data);
                             });
@@ -3060,7 +3105,7 @@ struct RCConnection {
             }
         }
         connected = false;
-        if (on_disconnected) pushEvent([this]() { on_disconnected("Connection closed", on_disconnected_data); });
+        queueDisconnectedEvent("Connection closed");
     }
     void ncRecvLoop() {
         while (running && nc_socket != INVALID_SOCKET) {
@@ -3136,6 +3181,7 @@ int rc_get_servers(RCHandle handle, RCServer** servers_out) {
 int rc_connect_to_server(RCHandle handle, int server_index) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (server_index < 0 || server_index >= conn->servers.size()) {
         conn->setError("Invalid server index");
         return 0;
@@ -3146,15 +3192,21 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
     conn->nc_authenticated = false;
     conn->nc_connected = false;
     if (conn->game_socket != INVALID_SOCKET) {
-        closesocket(conn->game_socket);
+        interruptSocket(conn->game_socket);
         conn->game_socket = INVALID_SOCKET;
     }
     if (conn->nc_socket != INVALID_SOCKET) {
-        closesocket(conn->nc_socket);
+        interruptSocket(conn->nc_socket);
         conn->nc_socket = INVALID_SOCKET;
     }
     if (conn->recv_thread.joinable()) conn->recv_thread.join();
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
+    {
+        std::lock_guard<std::mutex> event_lock(conn->event_mutex);
+        std::queue<std::pair<std::string, std::function<void()>>> empty;
+        conn->event_queue.swap(empty);
+    }
+    conn->disconnect_event_queued = false;
     const auto& server = conn->servers[server_index];
     conn->game_host = server.ip;
     conn->game_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -3225,7 +3277,7 @@ int rc_connect_to_nc_server(RCHandle handle) {
     conn->nc_authenticated = false;
     conn->nc_connected = false;
     if (conn->nc_socket != INVALID_SOCKET) {
-        closesocket(conn->nc_socket);
+        interruptSocket(conn->nc_socket);
         conn->nc_socket = INVALID_SOCKET;
     }
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
@@ -3304,8 +3356,16 @@ void rc_on_connected(RCHandle handle, RC_OnConnected callback, void* user_data) 
 void rc_on_disconnected(RCHandle handle, RC_OnDisconnected callback, void* user_data) {
     if (!handle) return;
     RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->callback_mutex);
     conn->on_disconnected = callback;
     conn->on_disconnected_data = user_data;
+}
+void rc_on_disconnected_ex(RCHandle handle, RC_OnDisconnectedEx callback, void* user_data) {
+    if (!handle) return;
+    RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->callback_mutex);
+    conn->on_disconnected_ex = callback;
+    conn->on_disconnected_ex_data = user_data;
 }
 void rc_on_player_joined(RCHandle handle, RC_OnPlayerJoined callback, void* user_data) {
     if (!handle) return;
@@ -3935,7 +3995,7 @@ int rc_disconnect_nc(RCHandle handle) {
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected) return 0;
     if (conn->nc_socket != INVALID_SOCKET) {
-        closesocket(conn->nc_socket);
+        interruptSocket(conn->nc_socket);
         conn->nc_socket = INVALID_SOCKET;
     }
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
@@ -5277,11 +5337,11 @@ void rc_disconnect(RCHandle handle) {
     RCConnection* conn = (RCConnection*)handle;
     conn->running = false;
     if (conn->game_socket != INVALID_SOCKET) {
-        closesocket(conn->game_socket);
+        interruptSocket(conn->game_socket);
         conn->game_socket = INVALID_SOCKET;
     }
     if (conn->nc_socket != INVALID_SOCKET) {
-        closesocket(conn->nc_socket);
+        interruptSocket(conn->nc_socket);
         conn->nc_socket = INVALID_SOCKET;
     }
     if (conn->recv_thread.joinable()) conn->recv_thread.join();
