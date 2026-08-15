@@ -3022,7 +3022,7 @@ struct RCConnection {
             }
             case PLO_NC_CLASSGET: { // 162 - Class script response
                 if (offset < packet.size()) {
-                    int name_len = grc::decodeGByte(packet[offset++]);
+                    int name_len = packet[offset++];
                     if (offset + name_len <= packet.size()) {
                         std::string class_name(packet.begin() + offset, packet.begin() + offset + name_len);
                         offset += name_len;
