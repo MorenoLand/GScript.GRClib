@@ -5198,29 +5198,37 @@ static int sendListerText(RCConnection* conn, const std::string& command, const 
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
 
-int rc_request_player_ban(RCHandle handle, const char* account, int player_id) {
+int rc_request_new_player_ban(RCHandle handle, const char* account, int player_id) {
     if (!handle || !account) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
     conn->pending_ban_account = account;
     conn->pending_ban_player_id = player_id;
-    if (conn->is_new_protocol) {
-        if (player_id >= 0) {
-            return sendListerText(conn, "getbanbyid", std::to_string(player_id), PLI_SENDTEXT);
-        }
-        return sendListerText(conn, "getban", account, PLI_SENDTEXT);
+    if (player_id >= 0) {
+        return sendListerText(conn, "getbanbyid", std::to_string(player_id), PLI_SENDTEXT);
     }
+    return sendListerText(conn, "getban", account, PLI_SENDTEXT);
+}
+
+int rc_request_legacy_player_ban(RCHandle handle, const char* account) {
+    if (!handle || !account) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
+    conn->pending_ban_account = account;
+    conn->pending_ban_player_id = -1;
     std::vector<uint8_t> data(account, account + strlen(account));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERBANGET, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
 
-int rc_request_player_ban_by_account(RCHandle handle, const char* account) {
+int rc_request_player_ban(RCHandle handle, const char* account, int player_id) {
     if (!handle || !account) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    conn->pending_ban_account = account;
-    conn->pending_ban_player_id = -1;
-    return sendListerText(conn, "getban", account, PLI_SENDTEXT);
+    return conn->is_new_protocol ? rc_request_new_player_ban(handle, account, player_id) : rc_request_legacy_player_ban(handle, account);
+}
+
+int rc_request_player_ban_by_account(RCHandle handle, const char* account) {
+    return rc_request_new_player_ban(handle, account, -1);
 }
 
 int rc_request_ban_types(RCHandle handle) {

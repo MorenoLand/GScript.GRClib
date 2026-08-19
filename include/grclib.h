@@ -234,6 +234,8 @@ GRCLIB_API int rc_irc_login(RCHandle handle);
 GRCLIB_API int rc_irc_join(RCHandle handle, const char* channel);
 GRCLIB_API int rc_irc_part(RCHandle handle, const char* channel);
 GRCLIB_API int rc_request_player_ban(RCHandle handle, const char* account, int player_id);
+GRCLIB_API int rc_request_new_player_ban(RCHandle handle, const char* account, int player_id);
+GRCLIB_API int rc_request_legacy_player_ban(RCHandle handle, const char* account);
 GRCLIB_API int rc_request_player_ban_by_account(RCHandle handle, const char* account);
 GRCLIB_API int rc_request_ban_types(RCHandle handle);
 GRCLIB_API int rc_request_ban_history(RCHandle handle, const char* account);
