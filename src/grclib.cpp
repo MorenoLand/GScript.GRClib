@@ -2117,6 +2117,7 @@ struct RCConnection {
                         if (!msg_content.empty() && msg_content.back() == ',') {
                             msg_content.pop_back();
                         }
+                        msg_content = grc::gtokenizeReverseString(msg_content);
                         std::string account;
                         std::string nick;
                         {
