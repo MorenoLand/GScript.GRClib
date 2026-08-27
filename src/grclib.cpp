@@ -782,6 +782,7 @@ struct RCConnection {
     std::vector<grc::ServerInfo> servers;
     SOCKET game_socket;
     SOCKET nc_socket;
+    std::mutex nc_socket_mutex;
     grc::GRCProtocol protocol;
     grc::NCProtocol nc_protocol;
     std::thread recv_thread;
@@ -791,6 +792,8 @@ struct RCConnection {
     std::atomic<bool> authenticated;
     std::atomic<bool> nc_connected;
     std::atomic<bool> nc_authenticated;
+    std::atomic<bool> nc_disconnect_requested;
+    std::atomic<bool> nc_disconnect_notified;
     std::atomic<bool> is_new_protocol;
     std::mutex callback_mutex;
     std::mutex error_mutex;
@@ -929,7 +932,7 @@ struct RCConnection {
     std::string server_flags;
     std::string folder_config;
     long long max_upload_file_size;
-    RCConnection() : game_socket(INVALID_SOCKET), nc_socket(INVALID_SOCKET), running(false), connected(false), authenticated(false), nc_connected(false), nc_authenticated(false), is_new_protocol(false), npcserver_player_id(0),
+    RCConnection() : game_socket(INVALID_SOCKET), nc_socket(INVALID_SOCKET), running(false), connected(false), authenticated(false), nc_connected(false), nc_authenticated(false), nc_disconnect_requested(false), nc_disconnect_notified(false), is_new_protocol(false), npcserver_player_id(0),
         on_connected(nullptr), on_connected_data(nullptr), on_disconnected(nullptr), on_disconnected_data(nullptr), on_disconnected_ex(nullptr), on_disconnected_ex_data(nullptr), disconnect_event_queued(false),
         on_player_joined(nullptr), on_player_joined_data(nullptr), on_player_left(nullptr), on_player_left_data(nullptr),
         on_message(nullptr), on_message_data(nullptr), on_private_message(nullptr), on_private_message_data(nullptr), on_private_message_ex(nullptr), on_private_message_ex_data(nullptr), on_file_received(nullptr), on_file_received_data(nullptr), on_sync_file_received(nullptr), on_sync_file_received_data(nullptr),
@@ -948,9 +951,41 @@ struct RCConnection {
         on_player_attributes(nullptr), on_player_attributes_data(nullptr), on_local_npcs(nullptr), on_local_npcs_data(nullptr),
         on_irc_message(nullptr), on_irc_message_data(nullptr), on_ban_data(nullptr), on_ban_data_data(nullptr),
         on_ban_list_data(nullptr), on_ban_list_data_data(nullptr), on_account_list(nullptr), on_account_list_data(nullptr), pending_npc_attributes_id(-1), pending_ban_player_id(-1), max_upload_file_size(0) {}
+    bool hasNCSocket() {
+        std::lock_guard<std::mutex> lock(nc_socket_mutex);
+        return nc_socket != INVALID_SOCKET;
+    }
+    SOCKET takeNCSocket() {
+        std::lock_guard<std::mutex> lock(nc_socket_mutex);
+        SOCKET socket = nc_socket;
+        nc_socket = INVALID_SOCKET;
+        return socket;
+    }
+    bool releaseNCSocket(SOCKET socket) {
+        std::lock_guard<std::mutex> lock(nc_socket_mutex);
+        if (nc_socket != socket) return false;
+        nc_socket = INVALID_SOCKET;
+        return true;
+    }
+    void setNCSocket(SOCKET socket) {
+        std::lock_guard<std::mutex> lock(nc_socket_mutex);
+        nc_socket = socket;
+    }
+    bool sendNC(const std::vector<uint8_t>& packet) {
+        std::lock_guard<std::mutex> lock(nc_socket_mutex);
+        return nc_socket != INVALID_SOCKET && grc::sendAll(nc_socket, packet.data(), packet.size());
+    }
     void setError(const std::string& err) {
         std::lock_guard<std::mutex> lock(error_mutex);
         last_error = err;
+    }
+    void notifyNCDisconnected(const std::string& reason) {
+        if (nc_disconnect_notified.exchange(true)) return;
+        setError(reason);
+        if (on_server_data) {
+            std::string message = "[NC] DISCONNECT: " + reason;
+            pushEvent([this, message]() { on_server_data("nc_message", message.c_str(), on_server_data_data); });
+        }
     }
     std::string getError() {
         std::lock_guard<std::mutex> lock(error_mutex);
@@ -1233,6 +1268,7 @@ struct RCConnection {
                     int npc_server_id = grc::decodeGShort(packet.data() + offset) - 0x1020;
                     offset += 2;
                     std::string npc_addr(packet.begin() + offset, packet.end());
+                    std::lock_guard<std::mutex> lock(cache_mutex);
                     npc_server_address = npc_addr;
                 }
                 break;
@@ -2695,10 +2731,9 @@ struct RCConnection {
         // Handle NC disconnect message
         if (packet_id == PLO_DISCMESSAGE) {
             std::string disconnect_msg(packet.begin() + offset, packet.end());
-            if (on_server_data) {
-                std::string msg = "[NC] DISCONNECT: " + disconnect_msg;
-                pushEvent([this, msg]() { on_server_data("nc_message", msg.c_str(), on_server_data_data); });
-            }
+            nc_authenticated = false;
+            nc_connected = false;
+            notifyNCDisconnected(disconnect_msg.empty() ? "Connection closed" : disconnect_msg);
             return;
         }
 
@@ -2706,7 +2741,7 @@ struct RCConnection {
             nc_authenticated = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             std::vector<uint8_t> weapon_request = nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
-            grc::sendAll(nc_socket, weapon_request.data(), weapon_request.size());
+            sendNC(weapon_request);
         }
 
         if (packet_id == PLO_RC_CHAT) {
@@ -3108,18 +3143,22 @@ struct RCConnection {
         connected = false;
         queueDisconnectedEvent("Connection closed");
     }
-    void ncRecvLoop() {
-        while (running && nc_socket != INVALID_SOCKET) {
+    void ncRecvLoop(SOCKET socket) {
+        std::string disconnect_reason;
+        while (running && nc_connected) {
             uint8_t length_bytes[2];
-            if (!grc::recvAll(nc_socket, length_bytes, 2)) {
+            if (!grc::recvAll(socket, length_bytes, 2)) {
+                disconnect_reason = "Connection closed";
                 break;
             }
             uint16_t packet_length = (length_bytes[0] << 8) | length_bytes[1];
             if (packet_length == 0 || packet_length > 65535) {
+                disconnect_reason = "Invalid NC packet length";
                 break;
             }
             std::vector<uint8_t> packet_data(packet_length);
-            if (!grc::recvAll(nc_socket, packet_data.data(), packet_length)) {
+            if (!grc::recvAll(socket, packet_data.data(), packet_length)) {
+                disconnect_reason = "Connection closed while receiving NC packet";
                 break;
             }
             std::vector<uint8_t> decompressed = nc_protocol.decryptPacket(packet_data.data(), packet_data.size());
@@ -3130,10 +3169,15 @@ struct RCConnection {
                 if (term_pos >= decompressed.size()) break;
                 std::vector<uint8_t> single_packet(decompressed.begin() + offset, decompressed.begin() + term_pos);
                 processNCPacket(single_packet);
+                if (!nc_connected) break;
                 offset = term_pos + 1;
             }
         }
+        const bool unexpected = running && !nc_disconnect_requested;
+        nc_authenticated = false;
         nc_connected = false;
+        if (releaseNCSocket(socket)) closesocket(socket);
+        if (unexpected && !nc_disconnect_notified && !disconnect_reason.empty()) notifyNCDisconnected(disconnect_reason);
     }
 };
 RCHandle rc_connect(const char* listserver_host, int listserver_port, const char* account, const char* password) {
@@ -3192,14 +3236,13 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
     conn->connected = false;
     conn->nc_authenticated = false;
     conn->nc_connected = false;
+    conn->nc_disconnect_requested = true;
     if (conn->game_socket != INVALID_SOCKET) {
         interruptSocket(conn->game_socket);
         conn->game_socket = INVALID_SOCKET;
     }
-    if (conn->nc_socket != INVALID_SOCKET) {
-        interruptSocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
-    }
+    SOCKET old_nc_socket = conn->takeNCSocket();
+    if (old_nc_socket != INVALID_SOCKET) interruptSocket(old_nc_socket);
     if (conn->recv_thread.joinable()) conn->recv_thread.join();
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
     {
@@ -3268,54 +3311,58 @@ int rc_is_nc_authenticated(RCHandle handle) {
 }
 int rc_has_nc_server(RCHandle handle) {
     if (!handle) return 0;
-    return ((RCConnection*)handle)->npc_server_address.empty() ? 0 : 1;
+    RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    return conn->npc_server_address.empty() ? 0 : 1;
 }
 int rc_connect_to_nc_server(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (conn->nc_connected && conn->nc_socket != INVALID_SOCKET) return 1;
+    if (conn->nc_connected && conn->hasNCSocket()) return 1;
+    conn->nc_disconnect_requested = true;
     conn->nc_authenticated = false;
     conn->nc_connected = false;
-    if (conn->nc_socket != INVALID_SOCKET) {
-        interruptSocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
-    }
+    SOCKET old_nc_socket = conn->takeNCSocket();
+    if (old_nc_socket != INVALID_SOCKET) interruptSocket(old_nc_socket);
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
-    if (conn->npc_server_address.empty()) {
+    std::string npc_server_address;
+    {
+        std::lock_guard<std::mutex> lock(conn->cache_mutex);
+        npc_server_address = conn->npc_server_address;
+    }
+    if (npc_server_address.empty()) {
         conn->setError("NC server address not received");
         return 0;
     }
-    size_t comma_pos = conn->npc_server_address.find(',');
+    size_t comma_pos = npc_server_address.find(',');
     if (comma_pos == std::string::npos) {
         conn->setError("Invalid NC server address format");
         return 0;
     }
-    std::string nc_host = conn->npc_server_address.substr(0, comma_pos);
-    int nc_port = std::atoi(conn->npc_server_address.substr(comma_pos + 1).c_str());
+    std::string nc_host = npc_server_address.substr(0, comma_pos);
+    int nc_port = std::atoi(npc_server_address.substr(comma_pos + 1).c_str());
     if ((nc_host == "127.0.0.1" || nc_host == "localhost" || nc_host == "0.0.0.0") && !conn->game_host.empty()) {
         nc_host = conn->game_host;
     }
-    conn->nc_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (conn->nc_socket == INVALID_SOCKET) {
+    SOCKET nc_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (nc_socket == INVALID_SOCKET) {
         conn->setError("Failed to create NC socket");
         return 0;
     }
     struct hostent* he = gethostbyname(nc_host.c_str());
     if (!he) {
         conn->setError("Failed to resolve NC server host");
-        closesocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
+        closesocket(nc_socket);
         return 0;
     }
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(nc_port);
     server_addr.sin_addr = *((struct in_addr*)he->h_addr);
-    if (connect(conn->nc_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
+    if (connect(nc_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
         conn->setError("Failed to connect to NC server");
-        closesocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
+        closesocket(nc_socket);
         return 0;
     }
     std::vector<uint8_t> login_data;
@@ -3338,14 +3385,16 @@ int rc_connect_to_nc_server(RCHandle handle) {
         login_data.insert(login_data.end(), conn->password.c_str(), conn->password.c_str() + password_len);
     }
     std::vector<uint8_t> login_packet = conn->nc_protocol.sendPacket(PLI_NPCPROPS, login_data);
-    if (!grc::sendAll(conn->nc_socket, login_packet.data(), login_packet.size())) {
+    if (!grc::sendAll(nc_socket, login_packet.data(), login_packet.size())) {
         conn->setError("Failed to send NC login");
-        closesocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
+        closesocket(nc_socket);
         return 0;
     }
+    conn->setNCSocket(nc_socket);
+    conn->nc_disconnect_requested = false;
+    conn->nc_disconnect_notified = false;
     conn->nc_connected = true;
-    conn->nc_recv_thread = std::thread(&RCConnection::ncRecvLoop, conn);
+    conn->nc_recv_thread = std::thread(&RCConnection::ncRecvLoop, conn, nc_socket);
     return 1;
 }
 void rc_on_connected(RCHandle handle, RC_OnConnected callback, void* user_data) {
@@ -3802,9 +3851,9 @@ int rc_execute(RCHandle handle, const char* command) {
     std::vector<uint8_t> data(command, command + strlen(command));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_CHAT, data);
     if (!grc::sendAll(conn->game_socket, packet.data(), packet.size())) return 0;
-    if (conn->nc_connected && conn->nc_authenticated && conn->nc_socket != INVALID_SOCKET) {
+    if (conn->nc_connected && conn->nc_authenticated && conn->hasNCSocket()) {
         std::vector<uint8_t> ncPacket = conn->nc_protocol.sendPacket(PLI_RC_CHAT, data);
-        if (!grc::sendAll(conn->nc_socket, ncPacket.data(), ncPacket.size())) return 0;
+        if (!conn->sendNC(ncPacket)) return 0;
     }
     return 1;
 }
@@ -3894,7 +3943,7 @@ int rc_add_weapon(RCHandle handle, const char* name, const char* image, const ch
     std::replace(tokenized.begin(), tokenized.end(), '\n', '\xa7');
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONADD, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_delete_weapon(RCHandle handle, const char* name) {
     if (!handle || !name) return 0;
@@ -3903,7 +3952,7 @@ int rc_delete_weapon(RCHandle handle, const char* name) {
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data(name, name + strlen(name));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONDELETE, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_update_weapon(RCHandle handle, const char* name, const char* image, const char* script) {
     if (!handle || !name || !image || !script) return 0;
@@ -3921,7 +3970,7 @@ int rc_update_weapon(RCHandle handle, const char* name, const char* image, const
     std::replace(tokenized.begin(), tokenized.end(), '\n', '\xa7');
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONADD, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_add_class(RCHandle handle, const char* name, const char* script) {
     if (!handle || !name || !script) return 0;
@@ -3934,7 +3983,7 @@ int rc_add_class(RCHandle handle, const char* name, const char* script) {
     std::string tokenized = grc::gtokenizeString(script);
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSADD, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_delete_class(RCHandle handle, const char* name) {
     if (!handle || !name) return 0;
@@ -3943,7 +3992,7 @@ int rc_delete_class(RCHandle handle, const char* name) {
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> data(name, name + strlen(name));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSDELETE, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_update_class(RCHandle handle, const char* name, const char* script) {
     if (!handle || !name || !script) return 0;
@@ -3956,7 +4005,7 @@ int rc_update_class(RCHandle handle, const char* name, const char* script) {
     std::string tokenized = grc::gtokenizeString(script);
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSADD, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_delete_npc(RCHandle handle, int npc_id) {
     if (!handle) return 0;
@@ -3966,7 +4015,7 @@ int rc_delete_npc(RCHandle handle, int npc_id) {
     std::vector<uint8_t> data;
     grc::writeGInt3(data, npc_id);
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCDELETE, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_update_npc(RCHandle handle, int npc_id, const char* script) {
     if (!handle || !script) return 0;
@@ -3978,7 +4027,7 @@ int rc_update_npc(RCHandle handle, int npc_id, const char* script) {
     std::string tokenized = grc::gtokenizeString(script);
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCSCRIPTSET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_create_npc_on_server(RCHandle handle, const char* name, int npc_id, const char* type, const char* scripter, const char* level, const char* x, const char* y) {
     if (!handle || !name || !type || !scripter || !level || !x || !y) return 0;
@@ -3988,20 +4037,20 @@ int rc_create_npc_on_server(RCHandle handle, const char* name, int npc_id, const
     std::string tokenized = grc::gtokenizeString(info);
     std::vector<uint8_t> data(tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCADD, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_disconnect_nc(RCHandle handle) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_connected) return 0;
-    if (conn->nc_socket != INVALID_SOCKET) {
-        interruptSocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
-    }
+    const bool was_connected = conn->nc_connected.exchange(false);
+    const bool was_authenticated = conn->nc_authenticated.exchange(false);
+    conn->nc_disconnect_requested = true;
+    SOCKET nc_socket = conn->takeNCSocket();
+    const bool had_thread = conn->nc_recv_thread.joinable();
+    if (nc_socket != INVALID_SOCKET) interruptSocket(nc_socket);
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
-    conn->nc_connected = false;
-    return 1;
+    return was_connected || was_authenticated || nc_socket != INVALID_SOCKET || had_thread ? 1 : 0;
 }
 int rc_set_nickname(RCHandle handle, const char* nickname) {
     if (!handle || !nickname) return 0;
@@ -4067,36 +4116,36 @@ int rc_request_npc_script(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
     std::vector<uint8_t> data = {(uint8_t)high, (uint8_t)mid, (uint8_t)low};
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCSCRIPTGET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_request_npc_attributes(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     conn->pending_npc_attributes_id = npc_id;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
     std::vector<uint8_t> data = {(uint8_t)high, (uint8_t)mid, (uint8_t)low};
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCGET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_request_class_script(RCHandle handle, const char* class_name) {
     if (!handle || !class_name) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     std::vector<uint8_t> data(class_name, class_name + strlen(class_name));
     data.push_back('\n');
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSEDIT, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_request_weapon_list(RCHandle handle) {
     if (!handle) return 0;
@@ -4104,33 +4153,35 @@ int rc_request_weapon_list(RCHandle handle) {
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_connected || !conn->nc_authenticated) return 0;
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONLISTGET, std::vector<uint8_t>());
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_request_weapon_script(RCHandle handle, const char* weapon_name) {
     if (!handle || !weapon_name) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     std::vector<uint8_t> data(weapon_name, weapon_name + strlen(weapon_name));
     data.push_back('\n');
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONGET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_reset_npc(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
     std::vector<uint8_t> data = {(uint8_t)high, (uint8_t)mid, (uint8_t)low};
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCRESET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_warp_npc(RCHandle handle, int npc_id, float x, float y, const char* level) {
     if (!handle || !level) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
@@ -4141,23 +4192,25 @@ int rc_warp_npc(RCHandle handle, int npc_id, float x, float y, const char* level
     data.push_back((uint8_t)y_val);
     data.insert(data.end(), level, level + strlen(level));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCWARP, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_get_npc_flags(RCHandle handle, int npc_id) {
     if (!handle) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
     std::vector<uint8_t> data = {(uint8_t)high, (uint8_t)mid, (uint8_t)low};
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCFLAGSGET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_set_npc_flags(RCHandle handle, int npc_id, const char* flags) {
     if (!handle || !flags) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     int high = ((npc_id >> 14) & 0xFF) + 32;
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
@@ -4165,7 +4218,7 @@ int rc_set_npc_flags(RCHandle handle, int npc_id, const char* flags) {
     std::string tokenized = grc::gtokenizeString(flags);
     data.insert(data.end(), tokenized.begin(), tokenized.end());
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCFLAGSSET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 int rc_request_player_rights(RCHandle handle, const char* account) {
     if (!handle || !account) return 0;
@@ -4275,14 +4328,14 @@ int rc_send_nc_packet(RCHandle handle, int packet_id, const char* data, int leng
     if (!handle || !data || length < 0) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
-    if (!conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     if (packet_id == PLI_NC_LEVELLISTGET) {
         std::lock_guard<std::mutex> lock(conn->cache_mutex);
         conn->pending_level_list = true;
     }
     std::vector<uint8_t> payload(data, data + length);
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(packet_id, payload);
-    if (grc::sendAll(conn->nc_socket, packet.data(), packet.size())) return 1;
+    if (conn->sendNC(packet)) return 1;
     if (packet_id == PLI_NC_LEVELLISTGET) {
         std::lock_guard<std::mutex> lock(conn->cache_mutex);
         conn->pending_level_list = false;
@@ -5149,14 +5202,15 @@ void rc_set_login_pcid_list(RCHandle handle, const char* pcid_list) {
 int rc_request_local_npcs(RCHandle handle, const char* level) {
     if (!handle || !level) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    if (!conn->nc_connected || !conn->nc_authenticated || conn->nc_socket == INVALID_SOCKET) return 0;
+    std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
+    if (!conn->nc_connected || !conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     {
         std::lock_guard<std::mutex> lock(conn->cache_mutex);
         conn->pending_local_npcs_level = level;
     }
     std::vector<uint8_t> data(level, level + strlen(level));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_LOCALNPCSGET, data);
-    return grc::sendAll(conn->nc_socket, packet.data(), packet.size()) ? 1 : 0;
+    return conn->sendNC(packet) ? 1 : 0;
 }
 
 int rc_send_irc_text(RCHandle handle, const char* command, const char* param1, const char* param2, const char* param3) {
@@ -5349,10 +5403,11 @@ void rc_disconnect(RCHandle handle) {
         interruptSocket(conn->game_socket);
         conn->game_socket = INVALID_SOCKET;
     }
-    if (conn->nc_socket != INVALID_SOCKET) {
-        interruptSocket(conn->nc_socket);
-        conn->nc_socket = INVALID_SOCKET;
-    }
+    conn->nc_disconnect_requested = true;
+    conn->nc_authenticated = false;
+    conn->nc_connected = false;
+    SOCKET nc_socket = conn->takeNCSocket();
+    if (nc_socket != INVALID_SOCKET) interruptSocket(nc_socket);
     if (conn->recv_thread.joinable()) conn->recv_thread.join();
     if (conn->nc_recv_thread.joinable()) conn->nc_recv_thread.join();
     delete conn;
