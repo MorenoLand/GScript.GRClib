@@ -125,7 +125,7 @@ typedef enum PlayerToServer
 	PLI_RC_FILEBROWSER_DELETE	= 97,
 	PLI_RC_FILEBROWSER_RENAME	= 98,
 	PLI_NC_LISTNPCS				= 100,	// {100} Request all database NPCs
-	PLI_NC_NPCGET				= 103,	// {103}{INT id}
+	PLI_NC_NPCGET				= 103,	// {103}{INT id}; an empty payload is also used as a 60-second NC keepalive
 	PLI_NC_NPCDELETE			= 104,	// {104}{INT id}
 	PLI_NC_NPCRESET				= 105,	// {105}{INT id}
 	PLI_NC_NPCSCRIPTGET			= 106,	// {106}{INT id}
