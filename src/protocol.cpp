@@ -105,7 +105,7 @@ static void writeGInt5(std::vector<uint8_t>& buf, int value) {
     buf.push_back((value & 0x7F) + 32);
 }
 std::string get1PlusTextNetString(const std::string& s) {
-    if (s.length() > 223) return std::string(1, (char)255) + s.substr(223);
+    if (s.length() > 223) return std::string(1, (char)255) + s.substr(0, 223);
     return std::string(1, (char)(32 + s.length())) + s;
 }
 static std::string replaceAll(std::string str, const std::string& from, const std::string& to) {

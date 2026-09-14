@@ -14,6 +14,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #ifdef _WIN32
 #include <windows.h>
@@ -39,6 +40,12 @@ static char* grcStrdup(const char* text) {
     if (out) memcpy(out, text, length);
     return out;
 }
+static void freeRCServer(RCServer& value) { free(value.name); free(value.ip); free(value.language); free(value.description); free(value.version); free(value.homepage); }
+static void freeRCPlayer(RCPlayer& value) { free(value.account); free(value.nick); free(value.level); }
+static void freeRCWeapon(RCWeapon& value) { free(value.name); free(value.image); free(value.script); }
+static void freeRCClass(RCClass& value) { free(value.name); free(value.script); }
+static void freeRCNPC(RCNPC& value) { free(value.name); free(value.type); free(value.image); free(value.script); free(value.level); }
+static void freeRCLevel(RCLevel& value) { free(value.name); free(value.type); }
 
 static bool validateHeap(const char* context) {
 #ifdef _WIN32
@@ -611,8 +618,13 @@ static bool jsonHasKey(const std::string& json, const std::string& key) {
 }
 
 static void writeAttrString(std::vector<uint8_t>& data, const std::string& value) {
-    data.push_back(grc::writeGByte((int)value.size()));
-    data.insert(data.end(), value.begin(), value.end());
+    if (value.size() < 0xe0) {
+        data.push_back((uint8_t)(value.size() + 0x20));
+        data.insert(data.end(), value.begin(), value.end());
+    } else {
+        data.push_back(0xff);
+        data.insert(data.end(), value.begin(), value.begin() + 0xdf);
+    }
 }
 
 static void writeRcLenString(std::vector<uint8_t>& data, const std::string& value) {
@@ -624,6 +636,7 @@ static void writeRcLenString(std::vector<uint8_t>& data, const std::string& valu
         data.insert(data.end(), value.begin(), value.begin() + 0xdf);
     }
 }
+static int roundCoordinate(double value) { return static_cast<int>(std::floor(value)); }
 
 static void writeAttrGInt3(std::vector<uint8_t>& data, int value) {
     data.push_back((uint8_t)(((value >> 14) & 0x7f) + 32));
@@ -807,10 +820,17 @@ struct RCConnection {
     std::vector<RCClass> class_cache;
     std::vector<RCNPC> npc_cache;
     std::vector<RCLevel> level_cache;
+    std::vector<RCPlayer> player_view_cache;
+    std::vector<RCWeapon> weapon_view_cache;
+    std::vector<RCClass> class_view_cache;
+    std::vector<RCNPC> npc_view_cache;
+    std::vector<RCLevel> level_view_cache;
     std::vector<std::string> pm_server_cache;
     std::vector<const char*> pm_server_ptr_cache;
+    std::vector<std::string> pm_server_view_cache;
     std::vector<std::string> pm_guild_cache;
     std::vector<const char*> pm_guild_ptr_cache;
+    std::vector<std::string> pm_guild_view_cache;
     std::map<int, std::string> npc_flags_cache;
     std::vector<FileBrowserFolderCacheEntry> filebrowser_folders;
     std::vector<RCFileBrowserFolder> filebrowser_folder_view;
@@ -950,7 +970,35 @@ struct RCConnection {
         on_player_rights(nullptr), on_player_rights_data(nullptr), on_player_text_data(nullptr), on_player_text_data_data(nullptr),
         on_player_attributes(nullptr), on_player_attributes_data(nullptr), on_local_npcs(nullptr), on_local_npcs_data(nullptr),
         on_irc_message(nullptr), on_irc_message_data(nullptr), on_ban_data(nullptr), on_ban_data_data(nullptr),
-        on_ban_list_data(nullptr), on_ban_list_data_data(nullptr), on_account_list(nullptr), on_account_list_data(nullptr), pending_npc_attributes_id(-1), pending_ban_player_id(-1), max_upload_file_size(0) {}
+         on_ban_list_data(nullptr), on_ban_list_data_data(nullptr), on_account_list(nullptr), on_account_list_data(nullptr), pending_npc_attributes_id(-1), pending_ban_player_id(-1), max_upload_file_size(0) {}
+    void clearServerOutput() { for (auto& value : server_cache) freeRCServer(value); server_cache.clear(); }
+    void clearPlayerOutput() { for (auto& value : player_view_cache) freeRCPlayer(value); player_view_cache.clear(); }
+    void clearWeaponOutput() { for (auto& value : weapon_view_cache) freeRCWeapon(value); weapon_view_cache.clear(); }
+    void clearClassOutput() { for (auto& value : class_view_cache) freeRCClass(value); class_view_cache.clear(); }
+    void clearNPCOutput() { for (auto& value : npc_view_cache) freeRCNPC(value); npc_view_cache.clear(); }
+    void clearLevelOutput() { for (auto& value : level_view_cache) freeRCLevel(value); level_view_cache.clear(); }
+    ~RCConnection() {
+        clearServerOutput();
+        for (auto& value : player_cache) freeRCPlayer(value);
+        for (auto& value : weapon_cache) freeRCWeapon(value);
+        for (auto& value : class_cache) freeRCClass(value);
+        for (auto& value : npc_cache) freeRCNPC(value);
+        for (auto& value : level_cache) freeRCLevel(value);
+        player_cache.clear();
+        weapon_cache.clear();
+        class_cache.clear();
+        npc_cache.clear();
+        level_cache.clear();
+        clearPlayerOutput();
+        clearWeaponOutput();
+        clearClassOutput();
+        clearNPCOutput();
+        clearLevelOutput();
+        for (auto& item : filebrowser_folder_view) { free((void*)item.rights); free((void*)item.pattern); }
+        for (auto& item : filebrowser_file_view) { free((void*)item.path); free((void*)item.rights); }
+        filebrowser_folder_view.clear();
+        filebrowser_file_view.clear();
+    }
     bool hasNCSocket() {
         std::lock_guard<std::mutex> lock(nc_socket_mutex);
         return nc_socket != INVALID_SOCKET;
@@ -2241,10 +2289,6 @@ struct RCConnection {
                         {
                             std::lock_guard<std::mutex> lock(cache_mutex);
                             pm_server_cache = names;
-                            pm_server_ptr_cache.clear();
-                            for (const auto& server_name : pm_server_cache) {
-                                pm_server_ptr_cache.push_back(server_name.c_str());
-                            }
                         }
                         if (on_pm_servers_updated) {
                             int count = static_cast<int>(names.size());
@@ -2265,8 +2309,6 @@ struct RCConnection {
                         {
                             std::lock_guard<std::mutex> lock(cache_mutex);
                             pm_guild_cache = names;
-                            pm_guild_ptr_cache.clear();
-                            for (const auto& guild_name : pm_guild_cache) pm_guild_ptr_cache.push_back(guild_name.c_str());
                         }
                         if (on_pm_guilds_updated) {
                             const int count = static_cast<int>(names.size());
@@ -2356,7 +2398,8 @@ struct RCConnection {
                             if (i > 3) server_data_str += ",";
                             server_data_str += parts[i];
                         }
-                        server_cache.clear();
+                        std::lock_guard<std::mutex> lock(cache_mutex);
+                        clearServerOutput();
                         size_t i = 0;
                         size_t pos = 0;
                         std::vector<std::string> entries;
@@ -2389,7 +2432,7 @@ struct RCConnection {
                             if (display_name.back() == '"') display_name.pop_back();
 
                             if (!server_name.empty() && !display_name.empty()) {
-                                RCServer server;
+                                RCServer server{};
                                 server.name = grcStrdup(display_name.c_str());
                                 server.players = player_count;
                                 server_cache.push_back(server);
@@ -2449,11 +2492,7 @@ struct RCConnection {
                 break;
             }
             case PLO_CLEARWEAPONS: {
-                for (auto& weapon : weapon_cache) {
-                    if (weapon.name) free(weapon.name);
-                    if (weapon.image) free(weapon.image);
-                }
-                weapon_cache.clear();
+                clearWeaponCache();
                 emitServerDataPacket("clearweapons", offset);
                 break;
             }
@@ -3207,7 +3246,8 @@ RCHandle rc_connect(const char* listserver_host, int listserver_port, const char
 int rc_get_servers(RCHandle handle, RCServer** servers_out) {
     if (!handle || !servers_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
-    conn->server_cache.clear();
+    std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    conn->clearServerOutput();
     for (const auto& server : conn->servers) {
         RCServer rc_server;
         rc_server.name = grcStrdup(server.name.c_str());
@@ -3368,22 +3408,8 @@ int rc_connect_to_nc_server(RCHandle handle) {
     std::vector<uint8_t> login_data;
     const char* ncl_header = "NCL21075";
     login_data.insert(login_data.end(), ncl_header, ncl_header + strlen(ncl_header));
-    int account_len = strlen(conn->account.c_str());
-    if (account_len > 223) {
-        login_data.push_back(255);
-        login_data.insert(login_data.end(), conn->account.c_str() + 223, conn->account.c_str() + account_len);
-    } else {
-        login_data.push_back(32 + account_len);
-        login_data.insert(login_data.end(), conn->account.c_str(), conn->account.c_str() + account_len);
-    }
-    int password_len = strlen(conn->password.c_str());
-    if (password_len > 223) {
-        login_data.push_back(255);
-        login_data.insert(login_data.end(), conn->password.c_str() + 223, conn->password.c_str() + password_len);
-    } else {
-        login_data.push_back(32 + password_len);
-        login_data.insert(login_data.end(), conn->password.c_str(), conn->password.c_str() + password_len);
-    }
+    writeRcLenString(login_data, conn->account);
+    writeRcLenString(login_data, conn->password);
     std::vector<uint8_t> login_packet = conn->nc_protocol.sendPacket(PLI_NPCPROPS, login_data);
     if (!grc::sendAll(nc_socket, login_packet.data(), login_packet.size())) {
         conn->setError("Failed to send NC login");
@@ -3677,43 +3703,59 @@ int rc_get_players(RCHandle handle, RCPlayer** players_out) {
     if (!handle || !players_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    *players_out = conn->player_cache.data();
-    return conn->player_cache.size();
+    conn->clearPlayerOutput();
+    conn->player_view_cache.reserve(conn->player_cache.size());
+    for (const auto& value : conn->player_cache) { RCPlayer copy{}; copy.account = value.account == nullptr ? nullptr : grcStrdup(value.account); copy.id = value.id; copy.nick = value.nick == nullptr ? nullptr : grcStrdup(value.nick); copy.level = value.level == nullptr ? nullptr : grcStrdup(value.level); conn->player_view_cache.push_back(copy); }
+    *players_out = conn->player_view_cache.data();
+    return conn->player_view_cache.size();
 }
 int rc_get_weapons(RCHandle handle, RCWeapon** weapons_out) {
     if (!handle || !weapons_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    *weapons_out = conn->weapon_cache.data();
-    return conn->weapon_cache.size();
+    conn->clearWeaponOutput();
+    conn->weapon_view_cache.reserve(conn->weapon_cache.size());
+    for (const auto& value : conn->weapon_cache) { RCWeapon copy{}; copy.name = value.name == nullptr ? nullptr : grcStrdup(value.name); copy.image = value.image == nullptr ? nullptr : grcStrdup(value.image); copy.script = value.script == nullptr ? nullptr : grcStrdup(value.script); conn->weapon_view_cache.push_back(copy); }
+    *weapons_out = conn->weapon_view_cache.data();
+    return conn->weapon_view_cache.size();
 }
 int rc_get_classes(RCHandle handle, RCClass** classes_out) {
     if (!handle || !classes_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    *classes_out = conn->class_cache.data();
-    return conn->class_cache.size();
+    conn->clearClassOutput();
+    conn->class_view_cache.reserve(conn->class_cache.size());
+    for (const auto& value : conn->class_cache) { RCClass copy{}; copy.name = value.name == nullptr ? nullptr : grcStrdup(value.name); copy.script = value.script == nullptr ? nullptr : grcStrdup(value.script); conn->class_view_cache.push_back(copy); }
+    *classes_out = conn->class_view_cache.data();
+    return conn->class_view_cache.size();
 }
 int rc_get_npcs(RCHandle handle, RCNPC** npcs_out) {
     if (!handle || !npcs_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    *npcs_out = conn->npc_cache.data();
-    return conn->npc_cache.size();
+    conn->clearNPCOutput();
+    conn->npc_view_cache.reserve(conn->npc_cache.size());
+    for (const auto& value : conn->npc_cache) { RCNPC copy{}; copy.id = value.id; copy.name = value.name == nullptr ? nullptr : grcStrdup(value.name); copy.type = value.type == nullptr ? nullptr : grcStrdup(value.type); copy.image = value.image == nullptr ? nullptr : grcStrdup(value.image); copy.script = value.script == nullptr ? nullptr : grcStrdup(value.script); copy.level = value.level == nullptr ? nullptr : grcStrdup(value.level); conn->npc_view_cache.push_back(copy); }
+    *npcs_out = conn->npc_view_cache.data();
+    return conn->npc_view_cache.size();
 }
 int rc_get_levels(RCHandle handle, RCLevel** levels_out) {
     if (!handle || !levels_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
-    *levels_out = conn->level_cache.data();
-    return conn->level_cache.size();
+    conn->clearLevelOutput();
+    conn->level_view_cache.reserve(conn->level_cache.size());
+    for (const auto& value : conn->level_cache) { RCLevel copy{}; copy.name = value.name == nullptr ? nullptr : grcStrdup(value.name); copy.type = value.type == nullptr ? nullptr : grcStrdup(value.type); conn->level_view_cache.push_back(copy); }
+    *levels_out = conn->level_view_cache.data();
+    return conn->level_view_cache.size();
 }
 int rc_get_pm_servers(RCHandle handle, const char*** servers_out) {
     if (!handle || !servers_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    conn->pm_server_view_cache = conn->pm_server_cache;
     conn->pm_server_ptr_cache.clear();
-    for (const auto& server_name : conn->pm_server_cache) {
+    for (const auto& server_name : conn->pm_server_view_cache) {
         conn->pm_server_ptr_cache.push_back(server_name.c_str());
     }
     *servers_out = conn->pm_server_ptr_cache.data();
@@ -3723,8 +3765,9 @@ int rc_get_pm_guilds(RCHandle handle, const char*** guilds_out) {
     if (!handle || !guilds_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    conn->pm_guild_view_cache = conn->pm_guild_cache;
     conn->pm_guild_ptr_cache.clear();
-    for (const auto& guild_name : conn->pm_guild_cache) conn->pm_guild_ptr_cache.push_back(guild_name.c_str());
+    for (const auto& guild_name : conn->pm_guild_view_cache) conn->pm_guild_ptr_cache.push_back(guild_name.c_str());
     *guilds_out = conn->pm_guild_ptr_cache.data();
     return static_cast<int>(conn->pm_guild_ptr_cache.size());
 }
@@ -3911,8 +3954,8 @@ int rc_warp_player(RCHandle handle, int player_id, const char* level, float x, f
     if (!conn->connected || !conn->authenticated) return 0;
     std::vector<uint8_t> data;
     grc::writeGShort(data, player_id);
-    data.push_back(grc::writeGByte((int)(x * 2)));
-    data.push_back(grc::writeGByte((int)(y * 2)));
+    data.push_back(grc::writeGByte(roundCoordinate(static_cast<double>(x) * 2.0)));
+    data.push_back(grc::writeGByte(roundCoordinate(static_cast<double>(y) * 2.0)));
     data.insert(data.end(), level, level + strlen(level));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_WARPPLAYER, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
@@ -4058,14 +4101,7 @@ int rc_set_nickname(RCHandle handle, const char* nickname) {
     if (!conn->connected || !conn->authenticated) return 0;
     std::vector<uint8_t> data;
     data.push_back(' ');
-    int nick_len = strlen(nickname);
-    if (nick_len > 223) {
-        data.push_back(255);
-        data.insert(data.end(), nickname + 223, nickname + nick_len);
-    } else {
-        data.push_back(32 + nick_len);
-        data.insert(data.end(), nickname, nickname + nick_len);
-    }
+    writeRcLenString(data, nickname);
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_PLAYERPROPS, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
@@ -4143,7 +4179,6 @@ int rc_request_class_script(RCHandle handle, const char* class_name) {
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     std::vector<uint8_t> data(class_name, class_name + strlen(class_name));
-    data.push_back('\n');
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_CLASSEDIT, data);
     return conn->sendNC(packet) ? 1 : 0;
 }
@@ -4161,7 +4196,6 @@ int rc_request_weapon_script(RCHandle handle, const char* weapon_name) {
     std::lock_guard<std::recursive_mutex> api_lock(conn->api_mutex);
     if (!conn->nc_authenticated || !conn->hasNCSocket()) return 0;
     std::vector<uint8_t> data(weapon_name, weapon_name + strlen(weapon_name));
-    data.push_back('\n');
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_WEAPONGET, data);
     return conn->sendNC(packet) ? 1 : 0;
 }
@@ -4186,10 +4220,8 @@ int rc_warp_npc(RCHandle handle, int npc_id, float x, float y, const char* level
     int mid = ((npc_id >> 7) & 0x7F) + 32;
     int low = (npc_id & 0x7F) + 32;
     std::vector<uint8_t> data = {(uint8_t)high, (uint8_t)mid, (uint8_t)low};
-    int x_val = (int)(x * 2);
-    int y_val = (int)(y * 2);
-    data.push_back((uint8_t)x_val);
-    data.push_back((uint8_t)y_val);
+    data.push_back(grc::writeGByte(roundCoordinate(static_cast<double>(x) * 2.0)));
+    data.push_back(grc::writeGByte(roundCoordinate(static_cast<double>(y) * 2.0)));
     data.insert(data.end(), level, level + strlen(level));
     std::vector<uint8_t> packet = conn->nc_protocol.sendPacket(PLI_NC_NPCWARP, data);
     return conn->sendNC(packet) ? 1 : 0;
@@ -4355,7 +4387,7 @@ char* rc_gtokenize_reverse(const char* content) {
 GRCLIB_API char* rc_get_1plus_text_net_string(const char* text) {
     if (!text) return nullptr;
     std::string s(text);
-    if (s.length() > 223) return grcStrdup((std::string(1, (char)255) + s.substr(223)).c_str());
+    if (s.length() > 223) return grcStrdup((std::string(1, (char)255) + s.substr(0, 223)).c_str());
     return grcStrdup((std::string(1, (char)(32 + s.length())) + s).c_str());
 }
 GRCLIB_API int rc_read_gbyte(const char* data, int length, int offset, int* value_out, int* offset_out) {
@@ -4705,22 +4737,15 @@ int rc_set_player_rights(RCHandle handle, const char* account, int rights_value,
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
     std::vector<uint8_t> data;
-    size_t account_len = strlen(account);
-    data.push_back(account_len + 32);
-    data.insert(data.end(), account, account + account_len);
+    writeRcLenString(data, account);
     grc::writeGInt5(data, rights_value);
-    size_t ip_len = strlen(ip_range);
-    data.push_back(ip_len + 32);
-    data.insert(data.end(), ip_range, ip_range + ip_len);
-    if (folder_access && strlen(folder_access) > 0) {
-        std::string folder_commatext = grc::gtokenizeString(folder_access);
-        size_t folder_len = folder_commatext.size();
-        uint8_t high = ((folder_len >> 7) & 0xFF) + 32;
-        uint8_t low = (folder_len & 0x7F) + 32;
-        data.push_back(high);
-        data.push_back(low);
-        data.insert(data.end(), folder_commatext.begin(), folder_commatext.end());
-    }
+    writeRcLenString(data, ip_range);
+    std::string folder_commatext = grc::gtokenizeString(folder_access ? folder_access : "");
+    if (folder_commatext.size() > 0x6fff) folder_commatext.resize(0x6fff);
+    const size_t folder_len = folder_commatext.size();
+    data.push_back((uint8_t)((folder_len >> 7) + 32));
+    data.push_back((uint8_t)((folder_len & 0x7f) + 32));
+    data.insert(data.end(), folder_commatext.begin(), folder_commatext.end());
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERRIGHTSSET, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
@@ -4729,9 +4754,7 @@ int rc_set_player_comments(RCHandle handle, const char* account, const char* com
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
     std::vector<uint8_t> data;
-    size_t account_len = strlen(account);
-    data.push_back(account_len + 32);
-    data.insert(data.end(), account, account + account_len);
+    writeRcLenString(data, account);
     std::string comments_commatext = grc::gtokenizeString(comments);
     data.insert(data.end(), comments_commatext.begin(), comments_commatext.end());
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERCOMMENTSSET, data);
@@ -4816,26 +4839,30 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     std::vector<uint8_t> data;
     writeAttrString(data, account_ptr);
     writeAttrString(data, jsonGetString(json, "world"));
-    data.push_back(grc::writeGByte((int)props.size()));
-    data.insert(data.end(), props.begin(), props.end());
+    writeAttrString(data, std::string(props.begin(), props.end()));
     std::vector<std::string> flags = jsonGetStringArray(json, "flags");
-    data.push_back((uint8_t)(((flags.size() >> 7) & 0xff) + 32)); data.push_back((uint8_t)((flags.size() & 0x7f) + 32));
-    for (const auto& flag : flags) writeAttrString(data, flag);
+    const int flag_count = static_cast<int>((std::min)(flags.size(), static_cast<size_t>(0x6fff)));
+    data.push_back((uint8_t)((flag_count >> 7) + 32)); data.push_back((uint8_t)((flag_count & 0x7f) + 32));
+    for (int index = 0; index < flag_count; ++index) writeAttrString(data, flags[index]);
     std::vector<std::string> chests = jsonGetStringArray(json, "chests");
-    data.push_back((uint8_t)(((chests.size() >> 7) & 0xff) + 32)); data.push_back((uint8_t)((chests.size() & 0x7f) + 32));
-    for (const auto& chest : chests) {
+    const int chest_count = static_cast<int>((std::min)(chests.size(), static_cast<size_t>(0x6fff)));
+    data.push_back((uint8_t)((chest_count >> 7) + 32)); data.push_back((uint8_t)((chest_count & 0x7f) + 32));
+    for (int index = 0; index < chest_count; ++index) {
+        const auto& chest = chests[index];
         const size_t first = chest.find(':');
         const size_t second = first == std::string::npos ? std::string::npos : chest.find(':', first + 1);
         if (first == std::string::npos || second == std::string::npos) { writeAttrString(data, chest); continue; }
-        const std::string filename = chest.substr(second + 1);
+        std::string filename = chest.substr(second + 1);
+        if (filename.size() > 0xdd) filename.resize(0xdd);
         data.push_back(grc::writeGByte((int)filename.size() + 2));
         data.push_back(grc::writeGByte(std::atoi(chest.substr(0, first).c_str())));
         data.push_back(grc::writeGByte(std::atoi(chest.substr(first + 1, second - first - 1).c_str())));
         data.insert(data.end(), filename.begin(), filename.end());
     }
     std::vector<std::string> weapons = jsonGetStringArray(json, "weapons");
-    data.push_back(grc::writeGByte((int)weapons.size()));
-    for (const auto& weapon : weapons) writeAttrString(data, weapon);
+    const int weapon_count = static_cast<int>((std::min)(weapons.size(), static_cast<size_t>(0xdf)));
+    data.push_back(grc::writeGByte(weapon_count));
+    for (int index = 0; index < weapon_count; ++index) writeAttrString(data, weapons[index]);
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERPROPSSET2, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
 }
