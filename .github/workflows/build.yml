@@ -20,7 +20,7 @@ jobs:
             cmake_arch: Win32
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: cmake -S . -B build -A ${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=Release
@@ -54,7 +54,7 @@ jobs:
             packages: "gcc-multilib g++-multilib"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install 32-bit toolchain
         if: matrix.packages != ''
@@ -95,7 +95,7 @@ jobs:
             osx_architectures: arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: >
@@ -122,7 +122,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
