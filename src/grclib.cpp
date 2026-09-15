@@ -1516,7 +1516,7 @@ struct RCConnection {
                                    prop_id == RC_PLPROP_BOMBSCOUNT || prop_id == RC_PLPROP_GLOVEPOWER ||
                                    prop_id == RC_PLPROP_BOMBPOWER || prop_id == RC_PLPROP_DIRECTION ||
                                    prop_id == RC_PLPROP_STATUS || prop_id == RC_PLPROP_CARRYSPRITE ||
-                                   prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_APCOUNTER || prop_id == RC_PLPROP_MAGICPOINTS ||
+                                   prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_MAGICPOINTS ||
                                    prop_id == RC_PLPROP_ALIGNMENT || prop_id == RC_PLPROP_ADDITFLAGS ||
                                    prop_id == RC_PLPROP_GMAPLEVELX || prop_id == RC_PLPROP_GMAPLEVELY ||
                                    prop_id == RC_PLPROP_JOINLEAVELVL || prop_id == RC_PLPROP_PCONNECTED ||
@@ -1636,6 +1636,13 @@ struct RCConnection {
                             }
                         } else if (prop_id == RC_PLPROP_CARRYNPC) {
                             parse_offset += 3;
+                        } else if (prop_id == RC_PLPROP_APCOUNTER) {
+                            if (parse_offset + 1 < packet.size()) {
+                                jsonAddNumber(properties, first_property, std::to_string(prop_id), decodeAttrGShort(packet, parse_offset));
+                                parse_offset += 2;
+                            } else {
+                                parse_offset = packet.size();
+                            }
                         } else if (prop_id == RC_PLPROP_UDPPORT || prop_id == RC_PLPROP_TEXTCODEPAGE) {
                             parse_offset += 3;
                         } else if (prop_id == RC_PLPROP_ATTACHNPC) {
@@ -4836,6 +4843,7 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     std::vector<uint8_t> props;
     auto addByte = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); props.push_back(grc::writeGByte((int)jsonGetNumber(json, key, 0))); } };
     auto addHalf = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); props.push_back(grc::writeGByte((int)(jsonGetNumber(json, key, 0) * 2))); } };
+    auto addGShort = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); grc::writeGShort(props, (int)jsonGetNumber(json, key, 0)); } };
     auto addGInt3 = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); writeAttrGInt3(props, (int)jsonGetNumber(json, key, 0)); } };
     auto addString = [&](int id, const std::string& key) { if (jsonHasKey(json, key)) { props.push_back(grc::writeGByte(id)); writeAttrString(props, jsonGetString(json, key)); } };
     addByte(RC_PLPROP_MAXPOWER, "1");
@@ -4844,7 +4852,7 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     addByte(RC_PLPROP_ARROWSCOUNT, "4");
     addByte(RC_PLPROP_BOMBSCOUNT, "5");
     addByte(RC_PLPROP_GLOVEPOWER, "6");
-    addByte(RC_PLPROP_APCOUNTER, "25");
+    addGShort(RC_PLPROP_APCOUNTER, "25");
     if (jsonHasKey(json, "sword_power") || jsonHasKey(json, "sword_image")) {
         int power = (int)jsonGetNumber(json, "sword_power", 0);
         std::string img = jsonGetString(json, "sword_image");
