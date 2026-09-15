@@ -304,7 +304,7 @@ typedef enum ServerToPlayer
 	PLO_UPDATEPACKAGEISUPDATED	= 187,	// Valid message in 5.07 and 6.037.  The code it uses is unique. -Codr
 	PLO_NC_CLASSDELETE			= 188,	// {188}{class}  Codr note: Unhandled by 5.07+.
 	PLO_MOVE2					= 189,	// {189}{INT id}...
-	PLO_RC_READY				= 190,	// RC-ready bootstrap packet.
+	PLO_SERVERLISTCONNECTED		= 190,	// {190} - the gserver connected to the listserver, informing the client it can log into IRC. NOTE: Sending this packet makes the client login to irc, request bantypes, pmguilds, pmservers, globalpms, buddytracking and stuff... Mainly tied to setText
 	PLO_SHOOT2					= 191,	// Valid message in 5.07 and 6.037.  The code it uses is unique. -Codr
 	PLO_NC_WEAPONGET			= 192,	// {192}{CHAR name length}{name}{CHAR image length}{image}{script}  Codr note: Unhandled by 5.07+.
 	PLO_UNKNOWN193				= 193,	// Valid message in 5.07.  The code it uses is unique.  The first parameter is likely a 5-byte integer.  There may be more.  Unhandled by 6.037. -Codr
