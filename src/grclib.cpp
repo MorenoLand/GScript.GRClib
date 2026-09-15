@@ -782,7 +782,7 @@ static const char* incomingRcPacketName(int packet_id) {
         PACKET_NAME_CASE(PLO_FILE);
         PACKET_NAME_CASE(PLO_RC_MAXUPLOADFILESIZE);
         PACKET_NAME_CASE(PLO_STATUSLIST);
-        PACKET_NAME_CASE(PLO_RC_READY);
+        PACKET_NAME_CASE(PLO_SERVERLISTCONNECTED);
         PACKET_NAME_CASE(PLO_CLEARWEAPONS);
         default: return "UNKNOWN";
     }
@@ -1261,7 +1261,7 @@ struct RCConnection {
                 }
                 break;
             }
-            case PLO_RC_READY: { // RC ready
+            case PLO_SERVERLISTCONNECTED: {
                 sendListerText(this, "bantypes", "", PLI_REQUESTTEXT);
                 sendListerText(this, "pmguilds", "", PLI_REQUESTTEXT);
                 sendListerText(this, "pmservers", "", PLI_REQUESTTEXT);
@@ -4795,7 +4795,7 @@ char* rc_get_packet_names(int nc, int direction) {
         PACKET_NAME_PAIR(PLO_SERVERTEXT), PACKET_NAME_PAIR(PLO_DISCMESSAGE), PACKET_NAME_PAIR(PLO_SIGNATURE),
         PACKET_NAME_PAIR(PLO_PRIVATEMESSAGE), PACKET_NAME_PAIR(PLO_STAFFGUILDS), PACKET_NAME_PAIR(PLO_LARGEFILESIZE),
         PACKET_NAME_PAIR(PLO_RAWDATA), PACKET_NAME_PAIR(PLO_BOARDPACKET), PACKET_NAME_PAIR(PLO_FILE), PACKET_NAME_PAIR(PLO_RC_MAXUPLOADFILESIZE),
-        PACKET_NAME_PAIR(PLO_STATUSLIST), PACKET_NAME_PAIR(PLO_RC_READY), PACKET_NAME_PAIR(PLO_CLEARWEAPONS)
+        PACKET_NAME_PAIR(PLO_STATUSLIST), PACKET_NAME_PAIR(PLO_SERVERLISTCONNECTED), PACKET_NAME_PAIR(PLO_CLEARWEAPONS)
     }));
 }
 
