@@ -673,10 +673,40 @@ static std::vector<uint8_t> zlibDecompress(const uint8_t* data, size_t len) {
     decompressed.resize(decompressed_size);
     return decompressed;
 }
+static std::vector<uint8_t> bzip2Compress(const uint8_t* data, size_t size) {
+    if (!data || size == 0 || size > static_cast<size_t>((std::numeric_limits<unsigned int>::max)())) return {};
+    const unsigned int source_size = static_cast<unsigned int>(size);
+    unsigned int destination_size = static_cast<unsigned int>((std::min)(size * 2 + 600, static_cast<size_t>((std::numeric_limits<unsigned int>::max)())));
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        std::vector<uint8_t> result(destination_size);
+        unsigned int actual_size = destination_size;
+        const int status = BZ2_bzBuffToBuffCompress(reinterpret_cast<char*>(result.data()), &actual_size, const_cast<char*>(reinterpret_cast<const char*>(data)), source_size, 5, 0, 0);
+        if (status == BZ_OK) { result.resize(actual_size); return result; }
+        if (status != BZ_OUTBUFF_FULL || destination_size > (std::numeric_limits<unsigned int>::max)() / 2) break;
+        destination_size *= 2;
+    }
+    return {};
+}
+static void compressGRC(const std::vector<uint8_t>& payload, uint8_t& compression_type, std::vector<uint8_t>& compressed_payload) {
+    compression_type = 0x02;
+    compressed_payload = payload;
+    if (payload.size() > 0xfff) {
+        const std::vector<uint8_t> compressed = bzip2Compress(payload.data(), payload.size());
+        if (!compressed.empty()) { compression_type = 0x06; compressed_payload = compressed; return; }
+    }
+    if (payload.size() > 0x2f) {
+        compression_type = 0x04;
+        compressed_payload = zlibCompress(payload.data(), payload.size());
+        return;
+    }
+    const std::vector<uint8_t> compressed = zlibCompress(payload.data(), payload.size());
+    if (compressed.size() < payload.size()) { compression_type = 0x04; compressed_payload = compressed; }
+}
 class GRCProtocol {
 public:
     uint32_t encryption_key;
     GRCProtocol() : encryption_key(0), iterator_out(0x4A80B38), iterator_in(0x4A80B38) {}
+    void reset() { encryption_key = 0; iterator_out = 0x4A80B38; iterator_in = 0x4A80B38; }
     void setEncryptionKey(uint32_t key) { encryption_key = key; }
     std::vector<uint8_t> encrypt(const uint8_t* data, size_t len, uint8_t compression_type) {
         if (encryption_key == 0 || len == 0) return std::vector<uint8_t>(data, data + len);
@@ -711,8 +741,9 @@ public:
         payload.push_back(packet_type + 32);
         payload.insert(payload.end(), data.begin(), data.end());
         payload.push_back(0x0A);
-        uint8_t compression_type = (data.size() > 40) ? 0x04 : 0x02;
-        std::vector<uint8_t> compressed_payload = (compression_type == 0x04) ? zlibCompress(payload.data(), payload.size()) : payload;
+        uint8_t compression_type = 0x02;
+        std::vector<uint8_t> compressed_payload;
+        compressGRC(payload, compression_type, compressed_payload);
         std::vector<uint8_t> final_packet;
         if (encryption_key != 0) {
             std::vector<uint8_t> encrypted_buffer = encrypt(compressed_payload.data(), compressed_payload.size(), compression_type);
@@ -730,8 +761,9 @@ public:
         return final_packet;
     }
     std::vector<uint8_t> rawBlock(const std::vector<uint8_t>& data) {
-        uint8_t compression_type = (data.size() > 40) ? 0x04 : 0x02;
-        std::vector<uint8_t> compressed_payload = (compression_type == 0x04) ? zlibCompress(data.data(), data.size()) : data;
+        uint8_t compression_type = 0x02;
+        std::vector<uint8_t> compressed_payload;
+        compressGRC(data, compression_type, compressed_payload);
         std::vector<uint8_t> final_packet;
         if (encryption_key != 0) {
             std::vector<uint8_t> encrypted_buffer = encrypt(compressed_payload.data(), compressed_payload.size(), compression_type);
@@ -754,6 +786,7 @@ public:
             uint8_t compression_type = data[0];
             std::vector<uint8_t> decrypted = decrypt(data + 1, len - 1, compression_type);
             if (compression_type == 0x04) return zlibDecompress(decrypted.data(), decrypted.size());
+            if (compression_type == 0x06) return bzip2Decompress(decrypted.data(), decrypted.size());
             return decrypted;
         } else {
             return std::vector<uint8_t>(data, data + len);

@@ -32,6 +32,10 @@ static void interruptSocket(SOCKET socket) {
 #endif
     closesocket(socket);
 }
+static std::string fileBasename(const std::string& path) {
+    size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
 
 static char* grcStrdup(const char* text) {
     if (!text) text = "";
@@ -845,6 +849,8 @@ struct RCConnection {
     };
     std::map<std::string, FileTransfer> file_transfers;
     std::string pending_file_download;
+    std::vector<std::string> pending_file_downloads;
+    std::string pending_large_file_transfer;
     std::set<std::string> sync_file_downloads;
     int pending_npc_attributes_id;
     std::mutex transfer_mutex;
@@ -977,27 +983,102 @@ struct RCConnection {
     void clearClassOutput() { for (auto& value : class_view_cache) freeRCClass(value); class_view_cache.clear(); }
     void clearNPCOutput() { for (auto& value : npc_view_cache) freeRCNPC(value); npc_view_cache.clear(); }
     void clearLevelOutput() { for (auto& value : level_view_cache) freeRCLevel(value); level_view_cache.clear(); }
+    void removePendingDownloadLocked(const std::string& path) {
+        const std::string basename = fileBasename(path);
+        auto iterator = std::find_if(pending_file_downloads.begin(), pending_file_downloads.end(), [&](const std::string& pending) { return pending == path || (!basename.empty() && fileBasename(pending) == basename); });
+        if (iterator != pending_file_downloads.end()) pending_file_downloads.erase(iterator);
+        if (pending_file_download == path || (!basename.empty() && fileBasename(pending_file_download) == basename)) pending_file_download = pending_file_downloads.empty() ? "" : pending_file_downloads.back();
+    }
+    std::string findPendingDownloadLocked(const std::string& filename) const {
+        const std::string basename = fileBasename(filename);
+        for (const auto& path : pending_file_downloads) {
+            if (path == filename || fileBasename(path) == filename || (!basename.empty() && fileBasename(path) == basename)) return path;
+        }
+        if (!pending_file_download.empty() && (pending_file_download == filename || fileBasename(pending_file_download) == basename)) return pending_file_download;
+        return "";
+    }
+    std::string findTransferKeyLocked(const std::string& filename) const {
+        auto exact = file_transfers.find(filename);
+        if (exact != file_transfers.end()) return exact->first;
+        const std::string basename = fileBasename(filename);
+        if (!basename.empty()) for (const auto& pair : file_transfers) if (fileBasename(pair.first) == basename) return pair.first;
+        if (filename.empty() && file_transfers.size() == 1) return file_transfers.begin()->first;
+        return "";
+    }
+    void registerPendingDownload(const std::string& path) {
+        std::lock_guard<std::mutex> lock(transfer_mutex);
+        pending_file_downloads.push_back(path);
+        pending_file_download = path;
+    }
+    void clearCachedState() {
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex);
+            npc_server_address.clear();
+            npcserver_player_id = 0;
+            clearServerOutput();
+            for (auto& value : player_cache) freeRCPlayer(value);
+            for (auto& value : weapon_cache) freeRCWeapon(value);
+            for (auto& value : class_cache) freeRCClass(value);
+            for (auto& value : npc_cache) freeRCNPC(value);
+            for (auto& value : level_cache) freeRCLevel(value);
+            player_cache.clear();
+            weapon_cache.clear();
+            class_cache.clear();
+            npc_cache.clear();
+            level_cache.clear();
+            clearPlayerOutput();
+            clearWeaponOutput();
+            clearClassOutput();
+            clearNPCOutput();
+            clearLevelOutput();
+            pm_server_cache.clear();
+            pm_server_ptr_cache.clear();
+            pm_server_view_cache.clear();
+            pm_guild_cache.clear();
+            pm_guild_ptr_cache.clear();
+            pm_guild_view_cache.clear();
+            npc_flags_cache.clear();
+            for (auto& item : filebrowser_folder_view) { free((void*)item.rights); free((void*)item.pattern); }
+            for (auto& item : filebrowser_file_view) { free((void*)item.path); free((void*)item.rights); }
+            filebrowser_folders.clear();
+            filebrowser_folder_view.clear();
+            filebrowser_files.clear();
+            filebrowser_file_view.clear();
+            filebrowser_current_folder.clear();
+            sync_filebrowser_requests.clear();
+            sync_filebrowser_start_pending = false;
+            pending_local_npcs_level.clear();
+            pending_level_list = false;
+            pending_pm_server_name.clear();
+            pending_pm_server_players.clear();
+            pending_ban_account.clear();
+            pending_ban_player_id = -1;
+            pending_npc_attributes_id = -1;
+            server_options.clear();
+            server_flags.clear();
+            folder_config.clear();
+            max_upload_file_size = 0;
+        }
+        {
+            std::lock_guard<std::mutex> lock(transfer_mutex);
+            file_transfers.clear();
+            pending_file_download.clear();
+            pending_file_downloads.clear();
+            pending_large_file_transfer.clear();
+            sync_file_downloads.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lock(callback_mutex);
+            pending_chat_messages.clear();
+            pending_server_data.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            last_error.clear();
+        }
+    }
     ~RCConnection() {
-        clearServerOutput();
-        for (auto& value : player_cache) freeRCPlayer(value);
-        for (auto& value : weapon_cache) freeRCWeapon(value);
-        for (auto& value : class_cache) freeRCClass(value);
-        for (auto& value : npc_cache) freeRCNPC(value);
-        for (auto& value : level_cache) freeRCLevel(value);
-        player_cache.clear();
-        weapon_cache.clear();
-        class_cache.clear();
-        npc_cache.clear();
-        level_cache.clear();
-        clearPlayerOutput();
-        clearWeaponOutput();
-        clearClassOutput();
-        clearNPCOutput();
-        clearLevelOutput();
-        for (auto& item : filebrowser_folder_view) { free((void*)item.rights); free((void*)item.pattern); }
-        for (auto& item : filebrowser_file_view) { free((void*)item.path); free((void*)item.rights); }
-        filebrowser_folder_view.clear();
-        filebrowser_file_view.clear();
+        clearCachedState();
     }
     bool hasNCSocket() {
         std::lock_guard<std::mutex> lock(nc_socket_mutex);
@@ -1044,6 +1125,7 @@ struct RCConnection {
         auto endsWith = [](const std::string& value, const std::string& suffix) { return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0; };
         {
             std::lock_guard<std::mutex> lock(transfer_mutex);
+            removePendingDownloadLocked(path);
             for (auto iterator = sync_file_downloads.begin(); iterator != sync_file_downloads.end(); ++iterator) {
                 const std::string& requested = *iterator;
                 const bool matches = requested == path || (requested.size() > path.size() && endsWith(requested, "/" + path)) || (path.size() > requested.size() && endsWith(path, "/" + requested));
@@ -1181,6 +1263,8 @@ struct RCConnection {
             }
             case PLO_UNKNOWN190: { // RC ready
                 sendListerText(this, "bantypes", "", PLI_REQUESTTEXT);
+                sendListerText(this, "pmguilds", "", PLI_REQUESTTEXT);
+                sendListerText(this, "pmservers", "", PLI_REQUESTTEXT);
                 break;
             }
             case PLO_DISCMESSAGE: { // 16 - Disconnect message
@@ -1207,35 +1291,16 @@ struct RCConnection {
                 std::string content;
                 {
                     std::lock_guard<std::mutex> lock(transfer_mutex);
-                    if (!pending_file_download.empty() && file_transfers.count(pending_file_download)) {
-                        transfer_key = pending_file_download;
-                    } else if (file_transfers.count(filename)) {
-                        transfer_key = filename;
-                    } else if (!filename.empty()) {
-                        size_t slash = filename.find_last_of("/\\");
-                        std::string basename = slash == std::string::npos ? filename : filename.substr(slash + 1);
-                        for (const auto& pair : file_transfers) {
-                            size_t key_slash = pair.first.find_last_of("/\\");
-                            std::string key_basename = key_slash == std::string::npos ? pair.first : pair.first.substr(key_slash + 1);
-                            if (key_basename == basename) {
-                                transfer_key = pair.first;
-                                break;
-                            }
-                        }
-                    } else if (file_transfers.size() == 1) {
-                        transfer_key = file_transfers.begin()->first;
-                    }
-                    if (!transfer_key.empty() && file_transfers[transfer_key].received > 0) {
+                    transfer_key = findTransferKeyLocked(filename);
+                    if (!transfer_key.empty()) {
                         auto& transfer = file_transfers[transfer_key];
                         content.assign(reinterpret_cast<const char*>(transfer.buffer.data()), transfer.buffer.size());
                         file_transfers.erase(transfer_key);
                     }
-                    if (!pending_file_download.empty() && (filename.empty() || pending_file_download == filename || pending_file_download == transfer_key)) {
-                        pending_file_download.clear();
-                    }
+                    if (!transfer_key.empty()) removePendingDownloadLocked(transfer_key);
                 }
 
-                if (!transfer_key.empty() && !content.empty()) {
+                if (!transfer_key.empty()) {
                     if (on_filebrowser_message) {
                         std::string msg = "File complete: " + transfer_key;
                         pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:file_complete");
@@ -1451,7 +1516,7 @@ struct RCConnection {
                                    prop_id == RC_PLPROP_BOMBSCOUNT || prop_id == RC_PLPROP_GLOVEPOWER ||
                                    prop_id == RC_PLPROP_BOMBPOWER || prop_id == RC_PLPROP_DIRECTION ||
                                    prop_id == RC_PLPROP_STATUS || prop_id == RC_PLPROP_CARRYSPRITE ||
-                                   prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_MAGICPOINTS ||
+                                   prop_id == RC_PLPROP_HORSEBUSHES || prop_id == RC_PLPROP_APCOUNTER || prop_id == RC_PLPROP_MAGICPOINTS ||
                                    prop_id == RC_PLPROP_ALIGNMENT || prop_id == RC_PLPROP_ADDITFLAGS ||
                                    prop_id == RC_PLPROP_GMAPLEVELX || prop_id == RC_PLPROP_GMAPLEVELY ||
                                    prop_id == RC_PLPROP_JOINLEAVELVL || prop_id == RC_PLPROP_PCONNECTED ||
@@ -1571,8 +1636,6 @@ struct RCConnection {
                             }
                         } else if (prop_id == RC_PLPROP_CARRYNPC) {
                             parse_offset += 3;
-                        } else if (prop_id == RC_PLPROP_APCOUNTER) {
-                            parse_offset += 2;
                         } else if (prop_id == RC_PLPROP_UDPPORT || prop_id == RC_PLPROP_TEXTCODEPAGE) {
                             parse_offset += 3;
                         } else if (prop_id == RC_PLPROP_ATTACHNPC) {
@@ -2035,8 +2098,10 @@ struct RCConnection {
                     std::string full_path;
                     {
                         std::lock_guard<std::mutex> lock(transfer_mutex);
-                        pending_file_download = filename;
-                        full_path = pending_file_download.empty() ? filename : pending_file_download;
+                        full_path = findPendingDownloadLocked(filename);
+                        if (!full_path.empty()) removePendingDownloadLocked(full_path);
+                        if (full_path.empty()) full_path = filename;
+                        pending_large_file_transfer = full_path;
                     }
                     size_t content_offset = 1 + name_end + 1;
                     if (content_offset < payload.size()) {
@@ -2143,7 +2208,10 @@ struct RCConnection {
                 std::string full_path;
                 {
                     std::lock_guard<std::mutex> lock(transfer_mutex);
-                    full_path = pending_file_download.empty() ? basename : pending_file_download;
+                    full_path = findPendingDownloadLocked(basename);
+                    if (!full_path.empty()) removePendingDownloadLocked(full_path);
+                    if (full_path.empty()) full_path = basename;
+                    pending_large_file_transfer = full_path;
                     FileTransfer transfer = {std::vector<uint8_t>(), 0, 0};
                     file_transfers[full_path] = transfer;
                 }
@@ -2163,21 +2231,22 @@ struct RCConnection {
                 std::string content;
                 {
                     std::lock_guard<std::mutex> lock(transfer_mutex);
-                    if (!pending_file_download.empty() && file_transfers.count(pending_file_download)) {
-                        transfer_key = pending_file_download;
-                    } else if (file_transfers.count(filename)) {
-                        transfer_key = filename;
+                    if (!pending_large_file_transfer.empty() && (filename.empty() || fileBasename(pending_large_file_transfer) == fileBasename(filename)) && file_transfers.count(pending_large_file_transfer)) {
+                        transfer_key = pending_large_file_transfer;
+                    } else {
+                        transfer_key = findTransferKeyLocked(filename);
                     }
 
-                    if (!transfer_key.empty() && file_transfers[transfer_key].received > 0) {
+                    if (!transfer_key.empty()) {
                         auto& transfer = file_transfers[transfer_key];
                         content.assign(reinterpret_cast<const char*>(transfer.buffer.data()), transfer.buffer.size());
                         file_transfers.erase(transfer_key);
                     }
-                    pending_file_download.clear();
+                    if (!transfer_key.empty()) removePendingDownloadLocked(transfer_key);
+                    if (pending_large_file_transfer == transfer_key) pending_large_file_transfer.clear();
                 }
 
-                if (!transfer_key.empty() && !content.empty()) {
+                if (!transfer_key.empty()) {
                     if (on_filebrowser_message) {
                         std::string msg = "Bigfile transfer ended: " + filename;
                         pushEvent([this, msg]() { on_filebrowser_message(msg.c_str(), on_filebrowser_message_data); }, "filebrowser_message:largefile_end");
@@ -2455,14 +2524,13 @@ struct RCConnection {
                     int b4 = grc::decodeGByte(packet[offset++]);
                     size_t file_size = ((size_t)b0 << 28) | ((size_t)b1 << 21) | ((size_t)b2 << 14) | ((size_t)b3 << 7) | b4;
 
-                    // Find the first transfer with size = 0 and set its size
                     {
                         std::lock_guard<std::mutex> lock(transfer_mutex);
-                        for (auto& pair : file_transfers) {
-                            if (pair.second.size == 0) {
-                                pair.second.size = file_size;
-                                break;
-                            }
+                        if (!pending_large_file_transfer.empty() && file_transfers.count(pending_large_file_transfer)) {
+                            file_transfers[pending_large_file_transfer].size = file_size;
+                        } else for (auto& pair : file_transfers) if (pair.second.size == 0) {
+                            pair.second.size = file_size;
+                            break;
                         }
                     }
                 }
@@ -2520,8 +2588,7 @@ struct RCConnection {
                             size_t chunk_total = 0;
                             {
                                 std::lock_guard<std::mutex> lock(transfer_mutex);
-                                if (file_transfers.count(filename)) transfer_key = filename;
-                                else if (!pending_file_download.empty() && file_transfers.count(pending_file_download)) transfer_key = pending_file_download;
+                                transfer_key = findTransferKeyLocked(filename);
                                 if (!transfer_key.empty()) {
                                     auto& transfer = file_transfers[transfer_key];
                                     transfer.buffer.insert(transfer.buffer.end(), content.begin(), content.end());
@@ -2565,13 +2632,8 @@ struct RCConnection {
         size_t newline_pos = filename.find('\n');
         if (newline_pos != std::string::npos) filename = filename.substr(0, newline_pos);
         std::lock_guard<std::mutex> lock(transfer_mutex);
-        if (!pending_file_download.empty()) {
-            if (filename == pending_file_download) return true;
-            size_t slash = pending_file_download.find_last_of("/\\");
-            std::string basename = slash == std::string::npos ? pending_file_download : pending_file_download.substr(slash + 1);
-            if (filename == basename) return true;
-        }
-        return file_transfers.count(filename) > 0;
+        if (!pending_large_file_transfer.empty() && (filename.empty() || fileBasename(pending_large_file_transfer) == fileBasename(filename)) && file_transfers.count(pending_large_file_transfer)) return true;
+        return !findTransferKeyLocked(filename).empty();
     }
     bool looksLikeFramedPacketData(const std::vector<uint8_t>& data) {
         if (data.empty()) return false;
@@ -2603,11 +2665,13 @@ struct RCConnection {
         size_t total = 0;
         {
             std::lock_guard<std::mutex> lock(transfer_mutex);
-            if (!pending_file_download.empty()) {
+            if (!pending_large_file_transfer.empty()) {
+                auto it = file_transfers.find(pending_large_file_transfer);
+                if (it != file_transfers.end() && it->second.size > 0) transfer_key = pending_large_file_transfer;
+            }
+            if (transfer_key.empty() && !pending_file_download.empty()) {
                 auto it = file_transfers.find(pending_file_download);
-                if (it != file_transfers.end() && it->second.size > 0) {
-                    transfer_key = pending_file_download;
-                }
+                if (it != file_transfers.end() && it->second.size > 0) transfer_key = pending_file_download;
             }
             if (transfer_key.empty()) {
                 for (const auto& pair : file_transfers) {
@@ -2668,7 +2732,8 @@ struct RCConnection {
         {
             std::lock_guard<std::mutex> lock(transfer_mutex);
             file_transfers.erase(path);
-            if (pending_file_download == path) pending_file_download.clear();
+            removePendingDownloadLocked(path);
+            if (pending_large_file_transfer == path) pending_large_file_transfer.clear();
         }
         if (on_filebrowser_message) {
             std::string msg = std::string("File downloaded: ") + path;
@@ -3291,6 +3356,9 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
         conn->event_queue.swap(empty);
     }
     conn->disconnect_event_queued = false;
+    conn->clearCachedState();
+    conn->protocol.reset();
+    conn->nc_disconnect_notified = false;
     const auto& server = conn->servers[server_index];
     conn->game_host = server.ip;
     conn->game_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -3901,7 +3969,7 @@ int rc_execute(RCHandle handle, const char* command) {
     return 1;
 }
 int rc_upload_file(RCHandle handle, const char* path, const char* content, int length) {
-    if (!handle || !path || !content) return 0;
+    if (!handle || !path || !content || length < 0) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->connected || !conn->authenticated) return 0;
     std::string filename = path;
@@ -3936,17 +4004,16 @@ int rc_upload_file(RCHandle handle, const char* path, const char* content, int l
     return grc::sendAll(conn->game_socket, end_packet.data(), end_packet.size()) ? 1 : 0;
 }
 int rc_download_file(RCHandle handle, const char* path) {
-    if (!handle || !path) return 0;
+    if (!handle || !path || !*path) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->connected || !conn->authenticated) return 0;
-    {
-        std::lock_guard<std::mutex> lock(conn->transfer_mutex);
-        conn->file_transfers.clear();
-        conn->pending_file_download = path;
-    }
+    conn->registerPendingDownload(path);
     std::vector<uint8_t> data(path, path + strlen(path));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_DOWN, data);
-    return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+    if (grc::sendAll(conn->game_socket, packet.data(), packet.size())) return 1;
+    std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+    conn->removePendingDownloadLocked(path);
+    return 0;
 }
 int rc_warp_player(RCHandle handle, int player_id, const char* level, float x, float y) {
     if (!handle || !level) return 0;
@@ -4480,18 +4547,14 @@ int rc_sync_filebrowser_cd(RCHandle handle, const char* folder_path) {
     return 0;
 }
 int rc_filebrowser_download(RCHandle handle, const char* file_path) {
-    if (!handle || !file_path) return 0;
+    if (!handle || !file_path || !*file_path) return 0;
     RCConnection* conn = (RCConnection*)handle;
     if (!conn->authenticated || conn->game_socket == INVALID_SOCKET) return 0;
-    {
-        std::lock_guard<std::mutex> lock(conn->transfer_mutex);
-        conn->file_transfers.clear();
-        conn->pending_file_download = file_path;
-    }
+    conn->registerPendingDownload(file_path);
     if (conn->isKnownEmptyDownload(file_path)) {
         {
             std::lock_guard<std::mutex> lock(conn->transfer_mutex);
-            conn->pending_file_download.clear();
+            conn->removePendingDownloadLocked(file_path);
         }
         conn->dispatchFileReceived(file_path, "", "known_empty");
         return 1;
@@ -4499,6 +4562,10 @@ int rc_filebrowser_download(RCHandle handle, const char* file_path) {
     std::vector<uint8_t> data(file_path, file_path + strlen(file_path));
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_FILEBROWSER_DOWN, data);
     int result = grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
+    if (!result) {
+        std::lock_guard<std::mutex> lock(conn->transfer_mutex);
+        conn->removePendingDownloadLocked(file_path);
+    }
     return result;
 }
 int rc_sync_filebrowser_download(RCHandle handle, const char* file_path) {
@@ -4519,8 +4586,8 @@ int rc_filebrowser_transfer_progress(RCHandle handle, const char* file_path, lon
     if (!handle || !file_path || !received_out || !total_out) return 0;
     RCConnection* conn = (RCConnection*)handle;
     std::lock_guard<std::mutex> lock(conn->transfer_mutex);
-    auto iterator = conn->file_transfers.find(file_path);
-    if (iterator == conn->file_transfers.end() && conn->pending_file_download == file_path) iterator = conn->file_transfers.find(conn->pending_file_download);
+    auto key = conn->findTransferKeyLocked(file_path);
+    auto iterator = conn->file_transfers.find(key);
     if (iterator == conn->file_transfers.end()) return 0;
     *received_out = static_cast<long long>(iterator->second.received);
     *total_out = static_cast<long long>(iterator->second.size);
@@ -4777,6 +4844,7 @@ int rc_set_player_attributes(RCHandle handle, const char* account_ptr, const cha
     addByte(RC_PLPROP_ARROWSCOUNT, "4");
     addByte(RC_PLPROP_BOMBSCOUNT, "5");
     addByte(RC_PLPROP_GLOVEPOWER, "6");
+    addByte(RC_PLPROP_APCOUNTER, "25");
     if (jsonHasKey(json, "sword_power") || jsonHasKey(json, "sword_image")) {
         int power = (int)jsonGetNumber(json, "sword_power", 0);
         std::string img = jsonGetString(json, "sword_image");
@@ -5014,7 +5082,7 @@ char* rc_format_player_attributes_text(const char* properties_json) {
     text << "MP: " << (int)jsonGetNumber(json, "26", 0) << "\n";
     text << "Gralats: " << (int)jsonGetNumber(json, "3", 0) << "\n";
     text << "Glove: " << (int)jsonGetNumber(json, "6", 0) << "\n";
-    text << "Bombs: " << (int)jsonGetNumber(json, "19", 0) << "\n";
+    text << "Bombs: " << (int)jsonGetNumber(json, "5", 0) << "\n";
     text << "Arrows: " << (int)jsonGetNumber(json, "4", 0) << "\n";
     text << "Sword Power: " << jsonGetNumber(json, "sword_power", 0) << "\n";
     text << "Sword Image: " << jsonGetString(json, "sword_image") << "\n";
@@ -5174,9 +5242,9 @@ char* rc_parse_player_attributes_text(const char* text_ptr) {
             else if (label == "Glove") numbers["6"] = std::atof(value.c_str());
             else if (label == "Bombs") numbers["5"] = std::atof(value.c_str());
             else if (label == "Arrows") numbers["4"] = std::atof(value.c_str());
-            else if (label == "Sword Power") strings["sword_power"] = value;
+            else if (label == "Sword Power") numbers["sword_power"] = std::atof(value.c_str());
             else if (label == "Sword Image") strings["sword_image"] = value;
-            else if (label == "Shield Power") strings["shield_power"] = value;
+            else if (label == "Shield Power") numbers["shield_power"] = std::atof(value.c_str());
             else if (label == "Shield Image") strings["shield_image"] = value;
             else if ((label == "Male" || label == "Paused" || label == "Hidden" || label == "Dead" ||
                       label == "Weapons Enabled" || label == "Weapons allowed" || label == "Hide sword" ||
@@ -5403,12 +5471,10 @@ int rc_set_legacy_player_ban(RCHandle handle, const char* account, int banned, c
     std::vector<uint8_t> data;
     size_t account_len = strlen(account);
     if (account_len > 223) return 0;
-    data.push_back(grc::writeGByte((int)account_len));
-    data.insert(data.end(), account, account + account_len);
+    writeRcLenString(data, account);
     data.push_back(grc::writeGByte(banned ? 1 : 0));
-    std::string reason_text = reason ? reason : "";
-    if (reason_text.size() > 223) reason_text = reason_text.substr(0, 223);
-    data.push_back(grc::writeGByte((int)reason_text.size()));
+    std::string reason_text = grc::gtokenizeString(reason ? reason : "");
+    if (reason_text.size() > 0x6fff) reason_text.resize(0x6fff);
     data.insert(data.end(), reason_text.begin(), reason_text.end());
     std::vector<uint8_t> packet = conn->protocol.sendPacket(PLI_RC_PLAYERBANSET, data);
     return grc::sendAll(conn->game_socket, packet.data(), packet.size()) ? 1 : 0;
