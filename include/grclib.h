@@ -4,7 +4,9 @@
 extern "C" {
 #endif
 #ifdef _WIN32
-#ifdef GRCLIB_EXPORTS
+#if defined(GRCLIB_STATIC)
+#define GRCLIB_API
+#elif defined(GRCLIB_EXPORTS)
 #define GRCLIB_API __declspec(dllexport)
 #else
 #define GRCLIB_API __declspec(dllimport)
@@ -29,6 +31,11 @@ typedef struct {
     char* nick;
     char* level;
 } RCPlayer;
+typedef struct {
+    char* name;
+    char* players;
+    char* id;
+} RCChannel;
 typedef struct {
     char* name;
     char* image;
@@ -155,6 +162,7 @@ GRCLIB_API void rc_on_ban_data(RCHandle handle, RC_OnBanData callback, void* use
 GRCLIB_API void rc_on_ban_list_data(RCHandle handle, RC_OnBanListData callback, void* user_data);
 GRCLIB_API void rc_on_account_list(RCHandle handle, RC_OnAccountList callback, void* user_data);
 GRCLIB_API int rc_get_players(RCHandle handle, RCPlayer** players_out);
+GRCLIB_API int rc_get_channels(RCHandle handle, RCChannel** channels_out);
 GRCLIB_API int rc_get_weapons(RCHandle handle, RCWeapon** weapons_out);
 GRCLIB_API int rc_get_classes(RCHandle handle, RCClass** classes_out);
 GRCLIB_API int rc_get_npcs(RCHandle handle, RCNPC** npcs_out);

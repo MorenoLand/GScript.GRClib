@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(grclib VERSION 1.0.0 LANGUAGES C CXX)
+option(GRCLIB_BUILD_SHARED "Build GRCLib as a shared library" ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(SOURCES
@@ -13,7 +14,11 @@ set(SOURCES
     deps/bzip2/src/randtable.c
 )
 set(HEADERS include/grclib.h include/IEnums.h)
-add_library(grclib SHARED ${SOURCES} ${HEADERS})
+if(GRCLIB_BUILD_SHARED)
+    add_library(grclib SHARED ${SOURCES} ${HEADERS})
+else()
+    add_library(grclib STATIC ${SOURCES} ${HEADERS})
+endif()
 target_include_directories(grclib
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -24,7 +29,11 @@ target_include_directories(grclib
 )
 if(WIN32)
     target_link_libraries(grclib PRIVATE ws2_32 advapi32 iphlpapi)
-    target_compile_definitions(grclib PRIVATE GRCLIB_EXPORTS)
+    if(GRCLIB_BUILD_SHARED)
+        target_compile_definitions(grclib PRIVATE GRCLIB_EXPORTS)
+    else()
+        target_compile_definitions(grclib PUBLIC GRCLIB_STATIC)
+    endif()
 endif()
 if(APPLE)
     target_link_libraries(grclib PRIVATE "-framework CoreFoundation" "-framework IOKit")

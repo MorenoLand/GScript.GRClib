@@ -46,6 +46,7 @@ static char* grcStrdup(const char* text) {
 }
 static void freeRCServer(RCServer& value) { free(value.name); free(value.ip); free(value.language); free(value.description); free(value.version); free(value.homepage); }
 static void freeRCPlayer(RCPlayer& value) { free(value.account); free(value.nick); free(value.level); }
+static void freeRCChannel(RCChannel& value) { free(value.name); free(value.players); free(value.id); }
 static void freeRCWeapon(RCWeapon& value) { free(value.name); free(value.image); free(value.script); }
 static void freeRCClass(RCClass& value) { free(value.name); free(value.script); }
 static void freeRCNPC(RCNPC& value) { free(value.name); free(value.type); free(value.image); free(value.script); free(value.level); }
@@ -191,6 +192,27 @@ static int playerAttrIndex(int prop_id) {
     return 0;
 }
 
+static constexpr int playerListFlagsProperty = 0x71;
+static bool isIrcPlayerAccount(const char* account) { return account != nullptr && std::string(account).rfind("irc:", 0) == 0; }
+static unsigned int parsePlayerListFlags(const std::string& value) { try { return static_cast<unsigned int>(std::stoul(value)); } catch (...) { return 0; } }
+static std::string trimChannelText(const std::string& value) { const size_t first = value.find_first_not_of(" \t\r\n"); if (first == std::string::npos) return ""; const size_t last = value.find_last_not_of(" \t\r\n"); return value.substr(first, last - first + 1); }
+static void channelValues(const RCPlayer& player, std::string& name, std::string& players, std::string& id) {
+    const std::string account = player.account == nullptr ? "" : player.account;
+    const std::string nick = player.nick == nullptr ? "" : player.nick;
+    const size_t opening = nick.find('(');
+    if (opening == std::string::npos) name = trimChannelText(nick);
+    else {
+        name = trimChannelText(nick.substr(0, opening));
+        const size_t closing = nick.find(')', opening + 1);
+        const std::string stats = nick.substr(opening + 1, closing == std::string::npos ? std::string::npos : closing - opening - 1);
+        const size_t comma = stats.find(',');
+        if (comma == std::string::npos) players = trimChannelText(stats);
+        else { players = trimChannelText(stats.substr(0, comma)); id = trimChannelText(stats.substr(comma + 1)); }
+    }
+    if (name.empty() && isIrcPlayerAccount(account.c_str())) name = account.substr(4);
+    if (name.empty()) name = account;
+}
+
 static std::string playerPropName(int prop_id) {
     int attr = playerAttrIndex(prop_id);
     if (attr) return "attr" + std::to_string(attr);
@@ -248,6 +270,7 @@ static std::string playerPropName(int prop_id) {
         case RC_PLPROP_Z2: return "precise_z";
         case RC_PLPROP_UNKNOWN81: return "unknown81";
         case RC_PLPROP_COMMUNITYNAME: return "community";
+        case playerListFlagsProperty: return "player_flags";
         default: return std::to_string(prop_id);
     }
 }
@@ -368,6 +391,11 @@ static bool readPlayerPropValue(const std::vector<uint8_t>& packet, size_t& offs
         if (offset + 1 >= packet.size()) return false;
         out.value = std::to_string(decodeAttrGShort(packet, offset));
         offset += 2;
+        return true;
+    }
+    if (prop_id == playerListFlagsProperty) {
+        if (offset >= packet.size()) return false;
+        out.value = std::to_string(decodeAttrByte(packet[offset++]));
         return true;
     }
     if (prop_id == RC_PLPROP_IPADDR) {
@@ -820,11 +848,13 @@ struct RCConnection {
     int npcserver_player_id;
     std::vector<RCServer> server_cache;
     std::vector<RCPlayer> player_cache;
+    std::map<int, unsigned int> player_list_flags;
     std::vector<RCWeapon> weapon_cache;
     std::vector<RCClass> class_cache;
     std::vector<RCNPC> npc_cache;
     std::vector<RCLevel> level_cache;
     std::vector<RCPlayer> player_view_cache;
+    std::vector<RCChannel> channel_view_cache;
     std::vector<RCWeapon> weapon_view_cache;
     std::vector<RCClass> class_view_cache;
     std::vector<RCNPC> npc_view_cache;
@@ -979,6 +1009,7 @@ struct RCConnection {
          on_ban_list_data(nullptr), on_ban_list_data_data(nullptr), on_account_list(nullptr), on_account_list_data(nullptr), pending_npc_attributes_id(-1), pending_ban_player_id(-1), max_upload_file_size(0) {}
     void clearServerOutput() { for (auto& value : server_cache) freeRCServer(value); server_cache.clear(); }
     void clearPlayerOutput() { for (auto& value : player_view_cache) freeRCPlayer(value); player_view_cache.clear(); }
+    void clearChannelOutput() { for (auto& value : channel_view_cache) freeRCChannel(value); channel_view_cache.clear(); }
     void clearWeaponOutput() { for (auto& value : weapon_view_cache) freeRCWeapon(value); weapon_view_cache.clear(); }
     void clearClassOutput() { for (auto& value : class_view_cache) freeRCClass(value); class_view_cache.clear(); }
     void clearNPCOutput() { for (auto& value : npc_view_cache) freeRCNPC(value); npc_view_cache.clear(); }
@@ -1022,11 +1053,13 @@ struct RCConnection {
             for (auto& value : npc_cache) freeRCNPC(value);
             for (auto& value : level_cache) freeRCLevel(value);
             player_cache.clear();
+            player_list_flags.clear();
             weapon_cache.clear();
             class_cache.clear();
             npc_cache.clear();
             level_cache.clear();
             clearPlayerOutput();
+            clearChannelOutput();
             clearWeaponOutput();
             clearClassOutput();
             clearNPCOutput();
@@ -1204,7 +1237,7 @@ struct RCConnection {
         filebrowser_file_view.clear();
     }
     void updateCachedPlayerProp(int player_id, const PlayerPropValue& prop) {
-        if (prop.name != "account" && prop.name != "nick" && prop.name != "level") return;
+        if (prop.name != "account" && prop.name != "nick" && prop.name != "level" && prop.id != playerListFlagsProperty) return;
         std::lock_guard<std::mutex> lock(cache_mutex);
         RCPlayer* player = nullptr;
         for (auto& cached : player_cache) {
@@ -1229,6 +1262,17 @@ struct RCConnection {
             if (player->level) free(player->level);
             player->level = prop.value.empty() ? nullptr : grcStrdup(prop.value.c_str());
         }
+        if (prop.id == playerListFlagsProperty) player_list_flags[player_id] = parsePlayerListFlags(prop.value);
+    }
+    bool isCurrentServerPlayer(const RCPlayer& player) const {
+        if (isIrcPlayerAccount(player.account)) return false;
+        const auto flags = player_list_flags.find(player.id);
+        return flags == player_list_flags.end() || (flags->second & 0x06u) == 0;
+    }
+    bool isChannelPlayer(const RCPlayer& player) const {
+        if (isIrcPlayerAccount(player.account)) return true;
+        const auto flags = player_list_flags.find(player.id);
+        return flags != player_list_flags.end() && (flags->second & 0x06u) != 0;
     }
     void emitPlayerPropChanged(int player_id, const PlayerPropValue& prop) {
         if (!on_player_prop_changed) return;
@@ -1820,6 +1864,7 @@ struct RCConnection {
                                 }
                                 break;
                             }
+                            bool current_server_player = true;
                             {
                                 std::lock_guard<std::mutex> lock(cache_mutex);
                                 bool found = false;
@@ -1843,9 +1888,16 @@ struct RCConnection {
                                     player.level = level.empty() ? nullptr : grcStrdup(level.c_str());
                                     player_cache.push_back(player);
                                 }
+                                for (const auto& prop : parsed_props) if (prop.id == playerListFlagsProperty) player_list_flags[player_id] = parsePlayerListFlags(prop.value);
+                                for (const auto& player : player_cache) {
+                                    if (player.id == player_id) {
+                                        current_server_player = isCurrentServerPlayer(player);
+                                        break;
+                                    }
+                                }
                             }
                             for (const auto& prop : parsed_props) emitPlayerPropChanged(player_id, prop);
-                            if (on_player_joined) {
+                            if (on_player_joined && current_server_player) {
                                 pushEvent([this, account, player_id]() {
                                     on_player_joined(account.c_str(), player_id, on_player_joined_data);
                                 });
@@ -1860,17 +1912,22 @@ struct RCConnection {
                     int player_id = grc::decodeGShort(packet.data() + offset);
                     offset += 2;
                     if (player_id >= 16000 && !pending_pm_server_name.empty()) break;
-                    std::lock_guard<std::mutex> lock(cache_mutex);
-                    for (auto it = player_cache.begin(); it != player_cache.end(); ++it) {
-                        if (it->id == player_id) {
-                            if (it->account) free(it->account);
-                            if (it->nick) free(it->nick);
-                            if (it->level) free(it->level);
-                            player_cache.erase(it);
-                            break;
+                    bool current_server_player = true;
+                    {
+                        std::lock_guard<std::mutex> lock(cache_mutex);
+                        for (auto it = player_cache.begin(); it != player_cache.end(); ++it) {
+                            if (it->id == player_id) {
+                                current_server_player = isCurrentServerPlayer(*it);
+                                if (it->account) free(it->account);
+                                if (it->nick) free(it->nick);
+                                if (it->level) free(it->level);
+                                player_cache.erase(it);
+                                break;
+                            }
                         }
+                        player_list_flags.erase(player_id);
                     }
-                    if (on_player_left) {
+                    if (on_player_left && current_server_player) {
                         pushEvent([this, player_id]() {
                             on_player_left("", player_id, on_player_left_data);
                         });
@@ -3780,9 +3837,38 @@ int rc_get_players(RCHandle handle, RCPlayer** players_out) {
     std::lock_guard<std::mutex> lock(conn->cache_mutex);
     conn->clearPlayerOutput();
     conn->player_view_cache.reserve(conn->player_cache.size());
-    for (const auto& value : conn->player_cache) { RCPlayer copy{}; copy.account = value.account == nullptr ? nullptr : grcStrdup(value.account); copy.id = value.id; copy.nick = value.nick == nullptr ? nullptr : grcStrdup(value.nick); copy.level = value.level == nullptr ? nullptr : grcStrdup(value.level); conn->player_view_cache.push_back(copy); }
+    for (const auto& value : conn->player_cache) {
+        if (!conn->isCurrentServerPlayer(value)) continue;
+        RCPlayer copy{};
+        copy.account = value.account == nullptr ? nullptr : grcStrdup(value.account);
+        copy.id = value.id;
+        copy.nick = value.nick == nullptr ? nullptr : grcStrdup(value.nick);
+        copy.level = value.level == nullptr ? nullptr : grcStrdup(value.level);
+        conn->player_view_cache.push_back(copy);
+    }
     *players_out = conn->player_view_cache.data();
     return conn->player_view_cache.size();
+}
+int rc_get_channels(RCHandle handle, RCChannel** channels_out) {
+    if (!handle || !channels_out) return 0;
+    RCConnection* conn = (RCConnection*)handle;
+    std::lock_guard<std::mutex> lock(conn->cache_mutex);
+    conn->clearChannelOutput();
+    conn->channel_view_cache.reserve(conn->player_cache.size());
+    for (const auto& value : conn->player_cache) {
+        if (!conn->isChannelPlayer(value)) continue;
+        std::string name;
+        std::string players;
+        std::string id;
+        channelValues(value, name, players, id);
+        RCChannel copy{};
+        copy.name = grcStrdup(name.c_str());
+        copy.players = grcStrdup(players.c_str());
+        copy.id = grcStrdup(id.c_str());
+        conn->channel_view_cache.push_back(copy);
+    }
+    *channels_out = conn->channel_view_cache.data();
+    return conn->channel_view_cache.size();
 }
 int rc_get_weapons(RCHandle handle, RCWeapon** weapons_out) {
     if (!handle || !weapons_out) return 0;
