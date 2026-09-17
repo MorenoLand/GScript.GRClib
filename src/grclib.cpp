@@ -3465,6 +3465,30 @@ int rc_connect_to_server(RCHandle handle, int server_index) {
     conn->recv_thread = std::thread(&RCConnection::recvLoop, conn);
     return 1;
 }
+RCHandle rc_connect_to_ip(const char* host, int port, const char* account, const char* password) {
+    if (!host || !account || !password || host[0] == '\0' || port <= 0 || port > 65535) return nullptr;
+#ifdef _WIN32
+    static bool wsa_initialized = false;
+    if (!wsa_initialized) {
+        WSADATA wsa_data;
+        WSAStartup(MAKEWORD(2, 2), &wsa_data);
+        wsa_initialized = true;
+    }
+#endif
+    auto* conn = new RCConnection();
+    conn->listserver_host = host;
+    conn->listserver_port = port;
+    conn->account = account;
+    conn->password = password;
+    conn->is_new_protocol = true;
+    grc::ServerInfo server{};
+    server.name = host;
+    server.ip = host;
+    server.port = port;
+    conn->servers.push_back(std::move(server));
+    rc_connect_to_server(conn, 0);
+    return conn;
+}
 int rc_is_connected(RCHandle handle) {
     if (!handle) return 0;
     return ((RCConnection*)handle)->connected ? 1 : 0;

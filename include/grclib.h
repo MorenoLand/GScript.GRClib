@@ -109,6 +109,7 @@ typedef void (*RC_OnBanData)(const char* account, const char* computer_id, const
 typedef void (*RC_OnBanListData)(const char* data_type, const char* account, const char* content, void* user_data);
 typedef void (*RC_OnAccountList)(const char* accounts, void* user_data);
 GRCLIB_API RCHandle rc_connect(const char* listserver_host, int listserver_port, const char* account, const char* password);
+GRCLIB_API RCHandle rc_connect_to_ip(const char* host, int port, const char* account, const char* password);
 GRCLIB_API int rc_get_servers(RCHandle handle, RCServer** servers_out);
 GRCLIB_API int rc_connect_to_server(RCHandle handle, int server_index);
 GRCLIB_API int rc_connect_to_nc_server(RCHandle handle);
